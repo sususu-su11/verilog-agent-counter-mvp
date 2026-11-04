@@ -26,6 +26,7 @@ async function init() {
     $("#req").readOnly = true;
     $("#req").title = "Public MOCK: only select fixed demo IDs";
     $("#mode").textContent += " · FIXED DEMOS ONLY · NO LIVE INFERENCE";
+    $("#run").textContent = "Run fixed MOCK demo";
     const btn = $("#probe");
     if (btn) btn.disabled = true;
   }

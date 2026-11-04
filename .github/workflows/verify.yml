@@ -22,9 +22,14 @@ jobs:
           bash -n deploy.sh
   docker-containment-regression:
     runs-on: ubuntu-latest
+    env:
+      # Match the image built in this job; never depend on a local ":latest" tag.
+      SANDBOX_IMAGE: verilog-sandbox:local
     steps:
       - uses: actions/checkout@v4
       - name: Build pinned sandbox image
         run: docker build -t verilog-sandbox:local ./sandbox
+      - name: Verify regression image tag exists
+        run: docker image inspect "$SANDBOX_IMAGE" --format "{{.Id}}"
       - name: Real Docker counter/sentinel/chaos regression (host asserts, no self-signoff)
         run: python3 -m scripts.real_sandbox_regression
