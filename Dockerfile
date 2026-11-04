@@ -13,6 +13,7 @@ COPY trusted ./trusted
 # Stage the exact same reviewed files in the immutable backend image.
 COPY sandbox ./sandbox
 COPY Dockerfile ./Dockerfile
+COPY .dockerignore ./.dockerignore
 COPY docker-compose.yml ./docker-compose.yml
 COPY deploy.sh ./deploy.sh
 COPY scripts ./scripts

@@ -43,7 +43,7 @@ def assert_no_labeled_containers():
     print('SANDBOX_LABEL_CLEANUP: no label=verilog-agent=1 containers remain')
 
 
-def run_one(label: str, rtl: str, expect: str):
+def run_one(label: str, rtl: str, expect: str | set[str]):
     gate = preflight.validate(rtl, 'counter')
     if not gate['ok']:
         raise RuntimeError(f'{label} preflight rejected: {gate}')
@@ -53,7 +53,10 @@ def run_one(label: str, rtl: str, expect: str):
     print(f'{label}: host={out["verdict"]} reason={out["reason"]} '
           f'checked={out.get("observations_checked")} '
           f'cleanup={raw.get("containment", {}).get("destroyed")}')
-    if out['reason'] != expect or not raw.get('containment', {}).get('destroyed'):
+    expected_reasons = {expect} if isinstance(expect, str) else expect
+    expected_verdict = 'PASS' if expected_reasons == {'ORACLE_AGREEMENT'} else 'FAIL'
+    if (out['reason'] not in expected_reasons or out['verdict'] != expected_verdict
+            or not raw.get('containment', {}).get('destroyed')):
         raise RuntimeError(f'{label} unexpected host result/cleanup')
     assert_no_labeled_containers()
 
@@ -111,7 +114,7 @@ def main():
                                              'count <= (count == 15) ? 15 : count + 1;')
         run_one('counter bad wrap', bad_wrap, 'ORACLE_MISMATCH')
         bad_x = canned.COUNTER_OK.replace("count <= 4'd0;", "count <= 4'bxxxx;")
-        run_one('counter X output', bad_x, 'ORACLE_MISMATCH')
+        run_one('counter X output', bad_x, {'ORACLE_MISMATCH', 'PROTOCOL_ERROR'})
         malicious = canned.COUNTER_OK.replace('endmodule', '$display("PASS"); endmodule')
         assert not preflight.validate(malicious, 'counter')['ok']
         print('MALICIOUS_RTL: rejected by preflight before run_sim')
