@@ -44,7 +44,7 @@ The real regression temporarily creates `/tmp/verilog-agent-host-sentinel/token`
 
 ## Public fixed MOCK mode — explicit opt-in only
 
-This is a minimal public **demonstration**, not a public submission service. Use a separate disposable rootless Docker VM, with firewall restrictions and careful cost monitoring. Set `.env` values:
+This is a minimal public **demonstration**, not a public submission service. A dedicated disposable VM with **rootful Docker** (`/var/run/docker.sock`) is permitted for the fixed-MOCK demo; **rootless is recommended but not required in `public_mock`**. This is an explicit, higher-risk exception to the production policy, not evidence of Blast Radius Zero. Restrict inbound access at the firewall/edge, avoid host secrets or other workloads on this VM, and monitor costs. Set `.env` values:
 
 ```dotenv
 APP_ENV=public_mock
@@ -54,20 +54,20 @@ MOCK_LLM=1
 VULTR_INFERENCE_API_KEY=
 USE_LOCAL_SIM=0
 SKIP_MANIFEST=0
-DOCKER_HOST_SOCKET=/run/user/1000/docker.sock
+DOCKER_HOST_SOCKET=/var/run/docker.sock
 PUBLIC_RATE_LIMIT_PER_MIN=6
 PUBLIC_GLOBAL_LIMIT_PER_MIN=60
 PUBLIC_MAX_ACTIVE_JOBS=2
 ```
 
-Then run **only** `./deploy.sh --public-mock`. Startup refuses missing opt-in, non-rootless Docker, configured inference credentials and downgraded sandbox/manifest controls. Direct `/api/jobs` calls must supply **only** `{ "demo_id": "counter" }` or `{ "demo_id": "counter_heal" }`; arbitrary requests, extra fields, unknown IDs and LLM-supplied RTL are rejected. `/docs`, `/redoc`, `/openapi.json` and `/api/probe` are disabled, with per-IP/global in-process throttles, active-job slots (max 2) and underlying sandbox parallel limit. UI text input is read-only and selected examples are sent by ID.
+Then run **only** `./deploy.sh --public-mock`. Startup refuses missing opt-in, configured inference credentials and downgraded sandbox/manifest controls. In `public_mock` it **does not enforce rootless**; `production` still requires rootless. Direct `/api/jobs` calls must supply **only** `{ "demo_id": "counter" }` or `{ "demo_id": "counter_heal" }`; arbitrary requests, extra fields, unknown IDs and LLM-supplied RTL are rejected. `/docs`, `/redoc`, `/openapi.json` and `/api/probe` are disabled, with per-IP/global in-process throttles, active-job slots (max 2) and underlying sandbox parallel limit. UI text input is read-only and selected examples are sent by ID.
 
-Check HTTP restrictions on the running public demo: `python3 -m scripts.public_mock_accept`. The public interface uses one Uvicorn worker (in-process rate limits are **not distributed**). Put additional request/body quotas and abuse protection at a trusted edge if publicly exposed. Do **not** accept proxy `X-Forwarded-For` as proof of client IP. Read/write access to the Docker socket remains a critical control-plane risk even with rootless Docker; keep the VM disposable and minimally privileged.
+Check HTTP restrictions on the running public demo: `python3 -m scripts.public_mock_accept`. The public interface uses one Uvicorn worker (in-process rate limits are **not distributed**). Put additional request/body quotas and abuse protection at a trusted edge if publicly exposed. Do **not** accept proxy `X-Forwarded-For` as proof of client IP. Mounting a rootful Docker socket into the backend gives a compromised backend effectively host-root Docker authority. Fixed demo IDs, rate limits and sandbox flags **do not** protect against backend compromise; keep the VM disposable, isolated from sensitive resources, firewall-restricted and separately monitored. Never accept arbitrary user RTL in public MOCK mode.
 
 ## Known limits / security boundary
 
 1. **Regex/static lint is not a complete SystemVerilog parser or sandbox.** It blocks known system tasks, `initial`, strings, directives, etc. before `run_sim`, but future grammar escapes and Icarus/Verilator parser vulnerabilities are not ruled out. Execute only in the restricted Docker container; keep tools patched. A genuine malicious RTL attempt must never be directly compiled on the host.
-2. **Docker daemon socket** is mounted in the backend, not the sandbox. The fixed-argv wrapper constrains normal paths but backend RCE could access the daemon; rootless reduces but does not eliminate damage. Public demo reduces attacker-controlled inputs, does not prove blast radius zero. This is **not recommended for arbitrary untrusted Internet code**.
+2. **Docker daemon socket** is mounted in the backend, not the sandbox. The fixed-argv wrapper constrains normal paths but backend RCE could access the daemon; rootless reduces but does not eliminate damage. **`public_mock` allows a rootful socket by operator choice; compromise of the backend on that VM may lead to host takeover.** Public demo reduces attacker-controlled inputs, does not prove blast radius zero. This is **not recommended for arbitrary untrusted Internet code**.
 3. **Isolation evidence is empirical, not proof.** The 10 sandbox probes, host sentinel, chaos TB and labeled-container cleanup must run on the target VM. Until those run, containment status is unverified.
 4. **Supply chain:** both base `FROM` images are pinned to *operator-provided* SHA256 values (see `VERSIONS`; validate on target VM). The backend Docker CLI `ADD` downloads a versioned tarball from a URL **without a verified content digest**, and Apt packages have only Debian repository version semantics. `iverilog` bookworm version is recorded as `11.0-1.1` but is not yet runtime-verified.
 5. **Manifest:** `trusted/manifest.json` is part of the reviewed source. `deploy.sh` only checks hashes; changing the oracle without a separately reviewed manifest update fails. A Git-committed manifest is not a cryptographic signature.

@@ -1,6 +1,8 @@
-# Counter MVP v3 — 实际测试记录
+# Counter MVP v3.3 — 实际测试记录
 
 **2026-11-04 | 仅代码级离线验证 | 不签发自主 PASS**
+
+**v3.3 变更**：仅 `public_mock` 不再调用 `require_rootless()`，允许操作者使用东京 VM 的 rootful `/var/run/docker.sock`。经模拟 rootful 条件，公开 MOCK 启动策略允许；`production` 仍拒绝 rootful。其余禁止降级、无 Inference key、固定 Demo ID、限流和并发限制保持。**没有执行东京 VM 的实际 Docker 启动，因此不宣称公开 Demo 验收通过。**
 
 本文件已重写，取代 v2 报告。以下命令在本次提供补丁的本地执行环境内实际执行；它们**不能**证明隔离 VM、真实 Docker/Icarus 仿真或 Vultr Serverless Inference 成功。
 
@@ -11,7 +13,7 @@ $ python3 -m trusted.verify_manifest
 MANIFEST_OK: counter4_sync_v1 26 assets
 
 $ python3 -W error::ResourceWarning -m unittest discover -s tests -v
-Ran 21 tests in 0.224s
+Ran 22 tests in 0.241s
 OK
 
 $ node --check app/static/app.js
@@ -32,7 +34,7 @@ $ command -v iverilog
 (no executable)
 ```
 
-上述 21 项是离线 Python unittest，含 16 项原有策略/伪造协议/接口与账本检查，以及 5 项公开 MOCK 新测试（固定 demo ID 与 API 禁止项、限流、并发槽、生产启动限制、digest/标签静态检查）。`test_synthetic_protocol_fixture_only` 的正例**是 Python 合成轨迹，不是真实 RTL 通过**。完整 unittest 控制台日志可另附 `v3_unittest.log`。
+上述 22 项是离线 Python unittest，含原有策略/伪造协议/接口与账本检查、公开 MOCK 固定 ID/限流/并发校验，并新增 production 模式仍要求 rootless 的回归（固定 demo ID 与 API 禁止项、限流、并发槽、生产启动限制、digest/标签静态检查）。`test_synthetic_protocol_fixture_only` 的正例**是 Python 合成轨迹，不是真实 RTL 通过**。完整 unittest 控制台日志可另附 `v3_3_unittest.log`。
 
 ## 已实现但未在本机执行的真实回归
 
@@ -46,7 +48,7 @@ python3 -m scripts.real_sandbox_regression
 python3 -m scripts.private_accept
 
 # 单独的公网 MOCK VM（不在私人 VM 上混用）
-# 确认 rootless Docker 和硬费用边界后：
+# 在专用无敏感数据的 VM 接受 rootful docker.sock 风险并确认硬费用边界后：
 ./deploy.sh --public-mock
 python3 -m scripts.public_mock_accept
 ```
@@ -57,7 +59,7 @@ CI 增加了 `docker-containment-regression` job，但**当前未观察其 GitHu
 
 ## 不得宣称的证据
 
-- 未确认 VM 部署、rootless 守护进程、实际映像拉取或安装在容器内的 `iverilog` 版本。
+- 未确认 VM 部署、rootless/rootful 守护进程、实际映像拉取或安装在容器内的 `iverilog` 版本。
 - 未核验用户提供的两个基础镜像 digest 在目标 VM 可拉取（仅按指定值固定）。
 - 未执行公网可达性/滥用压力测试、宿主 Docker 控制面攻击测试。
 - 未调用 Vultr Inference，没有 live 推理流水线、费用保障、录屏或 LabLab 提交证明。

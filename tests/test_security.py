@@ -229,9 +229,11 @@ class PublicMockSecurityTests(unittest.TestCase):
         env = {'APP_ENV':'public_mock', 'PUBLIC_BIND_HOST':'0.0.0.0',
                'PUBLIC_MOCK_ACK':'1', 'MOCK_LLM':'1'}
         with mock.patch.dict(os.environ, env, clear=True), \
-             mock.patch.object(config, 'require_rootless') as rootless:
+             mock.patch.object(config, 'require_rootless',
+                               side_effect=RuntimeError('Docker daemon is not rootless')) as rootless:
+            # public_mock must start even against a rootful Docker daemon.
             config.validate_startup()
-            rootless.assert_called_once()
+            rootless.assert_not_called()
             for flag in ('USE_LOCAL_SIM', 'SKIP_MANIFEST'):
                 with self.subTest(flag=flag), mock.patch.dict(os.environ, {flag:'1'}):
                     with self.assertRaises(RuntimeError): config.validate_startup()
@@ -240,6 +242,25 @@ class PublicMockSecurityTests(unittest.TestCase):
                         {'PUBLIC_MAX_ACTIVE_JOBS':'30'}):
                 with self.subTest(bad=bad), mock.patch.dict(os.environ, bad):
                     with self.assertRaises(RuntimeError): config.validate_startup()
+
+    def test_production_still_requires_rootless(self):
+        with tempfile.TemporaryDirectory() as td:
+            env = {
+                'APP_ENV': 'production',
+                'PUBLIC_BIND_HOST': '127.0.0.1',
+                'MOCK_LLM': '0',
+                'APP_BASIC_USER': 'operator',
+                'APP_BASIC_PASSWORD': 'x' * 32,
+                'VULTR_INFERENCE_API_KEY': 'dummy-not-used',
+                'LIVE_INFERENCE_MAX_CALLS': '1',
+                'INFERENCE_LEDGER_PATH': str(Path(td) / 'budget.sqlite'),
+            }
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(config, 'require_rootless',
+                                   side_effect=RuntimeError('Docker daemon is not rootless')) as rootless:
+                with self.assertRaisesRegex(RuntimeError, 'not rootless'):
+                    config.validate_startup()
+                rootless.assert_called_once()
 
     def test_public_http_only_fixed_demo_ids(self):
         from fastapi.testclient import TestClient

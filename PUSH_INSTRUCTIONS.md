@@ -7,7 +7,7 @@ This delivery includes a local Git commit and a Git bundle, but the connected Gi
 To publish from a machine with authorized GitHub write credentials, either extract the ZIP and initialize a new Git repo, or import the included bundle:
 
 ```bash
-git clone -b main verilog-agent-counter-mvp-v3.bundle verilog-agent-counter-mvp
+git clone -b main verilog-agent-counter-mvp-v3.3.bundle verilog-agent-counter-mvp
 cd verilog-agent-counter-mvp
 git remote add origin https://github.com/sususu-su11/verilog-agent-counter-mvp.git
 git push -u origin main

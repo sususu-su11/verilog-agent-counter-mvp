@@ -63,7 +63,10 @@ def validate_startup() -> None:
         if not enabled('PUBLIC_MOCK_ACK'):
             raise RuntimeError('public_mock requires operator PUBLIC_MOCK_ACK=1')
         public_limits()
-        require_rootless()
+        # Public fixed-MOCK demonstrations may use an explicitly selected
+        # rootful Docker socket on a disposable VM. This is an operator-accepted
+        # control-plane risk, NOT equivalent to rootless isolation. Keep all
+        # other public input, credential, downgrade and rate-limit gates.
         return
     password = os.environ.get('APP_BASIC_PASSWORD', '')
     if (not os.environ.get('APP_BASIC_USER') or len(password) < 24 or

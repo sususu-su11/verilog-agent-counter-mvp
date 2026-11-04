@@ -1,4 +1,4 @@
-# Counter MVP v3 修补记录（不签发独立 PASS）
+# Counter MVP v3.3 修补记录（不签发独立 PASS）
 
 基线：v2 本地修补包。此次为代码与审查文档增量，**未运行 Docker/Icarus、未部署 Vultr、未调用真实 Inference、未向 LabLab 提交**。
 
@@ -10,7 +10,7 @@
 | Host sentinel + chaos TB + label + regression | `sandbox/probe.py`, `trusted/chaos_tb.sv`, `app/docker_wrapper.py`, `scripts/real_sandbox_regression.py` | 源码与测试路径齐备，容器标签和拒绝协议有离线测试 | 主机 token、10 个探针、chaos、docker ps 标签清理 |
 | 两个 FROM digest 与 Icarus 版本 | `Dockerfile`, `sandbox/Dockerfile`, `VERSIONS` | 按用户提供 digest 精确写入，Icarus 记录 `11.0-1.1` | 确认镜像可拉取并检查安装版本 |
 | README lint/socket 风险 | `README.md` | 如实声明 regex lint 非安全沙箱，docker.sock 是控制面残余风险 | 审核 VM 上的 daemon 权限 |
-| 公开 MOCK 固定 Demo | `app/config.py`, `app/main.py`, `app/agent.py`, `app/static/app.js`, `deploy.sh`, `docker-compose.yml`, `scripts/public_mock_accept.py` | 仅固定 ID、限流、并发、关 Swagger/Probe、rootless/显式开关、防降级均有单测 | 公网 VM 安全和真实 HTTP 验收 |
+| 公开 MOCK 固定 Demo | `app/config.py`, `app/main.py`, `app/agent.py`, `app/static/app.js`, `deploy.sh`, `docker-compose.yml`, `scripts/public_mock_accept.py` | 仅固定 ID、限流、并发、关 Swagger/Probe、显式开关、防降级均有单测；v3.3 允许公开 MOCK 使用 rootful Docker（已知高风险） | 公网 VM 安全和真实 HTTP 验收 |
 
 ## 受审文件与验收
 
@@ -27,6 +27,6 @@ bash -n deploy.sh
 
 真实 Docker 私有 VM：`./deploy.sh`，随后 `python3 -m scripts.real_sandbox_regression`、`python3 -m scripts.private_accept`。
 
-独立公开 MOCK VM：`APP_ENV=public_mock` + `MOCK_LLM=1` + 无 API key + rootless Docker + 允许显式公网绑定后 `./deploy.sh --public-mock`；随后 `python3 -m scripts.public_mock_accept`。
+独立公开 MOCK VM：`APP_ENV=public_mock` + `MOCK_LLM=1` + 无 API key + 显式选择 Docker socket + 显式公网绑定后 `./deploy.sh --public-mock`；随后 `python3 -m scripts.public_mock_accept`。**v3.3 行为变化：** `public_mock` 不再强制 `require_rootless()`，允许东京 VM 现有 rootful `/var/run/docker.sock`；保留仅固定 demo ID、限流、并发、禁任意 RTL、无真实推理及禁降级开关。backend 挂载 rootful socket 意味着被攻破后可能获得宿主权限，必须使用独立、无敏感数据的临时 VM 和外围访问限制。`APP_ENV=production` 仍强制 rootless。本次仅离线测试，未在 VM 执行 Docker 回归。
 
 **没有自动扣费脚本**；操作者自行确认 Vultr 信用金硬上限，不能把代码里的调用计数器当作不会扣银行卡的保证。`TEST_RESULTS.md` 是当前已执行命令的真实摘要，不是 VM PASS 证明。

@@ -7,11 +7,14 @@ services:
     environment:
       PYTHONPATH: /srv
       INFERENCE_LEDGER_PATH: /state/quota.sqlite
-    # Private VM only: reach through SSH tunnel; never expose Docker control plane publicly.
+    # Private mode: loopback/SSH. Public fixed-MOCK: explicit opt-in and edge firewall.
+    # Docker socket is powerful even when the HTTP API accepts only fixed demo IDs.
     ports:
       - "${PUBLIC_BIND_HOST:-127.0.0.1}:${PUBLIC_PORT:-8000}:8000"
     volumes:
-      # Explicitly selected rootless socket preferred; rootful daemon is a residual risk.
+      # Rootful /var/run/docker.sock is supported for disposable public MOCK VM
+      # but is a HIGH-RISK control-plane mount (backend compromise => host access).
+      # Prefer rootless where available; production still requires rootless.
       - "${DOCKER_HOST_SOCKET:?Set an explicit audited Docker socket path}:/var/run/docker.sock"
       - ./state:/state
     read_only: true
