@@ -1,0 +1,44 @@
+{
+  "verdict": "PASS",
+  "family": "counter",
+  "reason": "ORACLE_AGREEMENT",
+  "candidate_sha256": "e647b73bc0f73b648a60129557e8a45b5566206275c6fa7229abf5becc4ddaf0",
+  "testbench_sha256": "2fe9e78fe614b89af9aba927a8129c9ba4c6ee20a19378610dadf99d13069431",
+  "vector_sha256": "31512181346f5874a729c14c08e965d5630a00d53f2e2318fc4d457cef4b91b3",
+  "simulation_exit_code": 0,
+  "timeout": false,
+  "observations_checked": 87,
+  "mismatches": [],
+  "nonce": "217c3175b740e6a2781e1015b3735bf8",
+  "manifest": {
+    "expected": {
+      "tb_counter.sv": "2fe9e78fe614b89af9aba927a8129c9ba4c6ee20a19378610dadf99d13069431",
+      "vectors/counter.json": "31512181346f5874a729c14c08e965d5630a00d53f2e2318fc4d457cef4b91b3",
+      "oracle.py": "e8338096b9c66c0d654d513ac8243dfc9f95fe6c7a14923f1bb2cf6276407a51",
+      "verdict.py": "f4926f8f1d0bb0ef3543eb36cc91d66e8c44a93e04abf4b57626662730336727",
+      "lint_rtl.py": "c94b3530713cc89c8ccf57543fe6270aebac4717311a0e812767917ee41b49d6"
+    },
+    "got": {
+      "tb_counter.sv": "2fe9e78fe614b89af9aba927a8129c9ba4c6ee20a19378610dadf99d13069431",
+      "vectors/counter.json": "31512181346f5874a729c14c08e965d5630a00d53f2e2318fc4d457cef4b91b3",
+      "oracle.py": "e8338096b9c66c0d654d513ac8243dfc9f95fe6c7a14923f1bb2cf6276407a51",
+      "verdict.py": "f4926f8f1d0bb0ef3543eb36cc91d66e8c44a93e04abf4b57626662730336727",
+      "lint_rtl.py": "c94b3530713cc89c8ccf57543fe6270aebac4717311a0e812767917ee41b49d6"
+    },
+    "version": "counter4_sync_v1"
+  },
+  "protocol": {
+    "begin": {
+      "family": "counter",
+      "suite_id": "counter4_sync_v1"
+    },
+    "end": {
+      "record_count": 87,
+      "tb_error_count": 0
+    },
+    "tberrs": [],
+    "protocol_errors": [],
+    "n_records": 87
+  },
+  "mismatch_count": 0
+}

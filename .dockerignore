@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+state
+review_inputs
+__pycache__
+*.pyc
+*.sqlite
+*.db
+.venv
+.pytest_cache
+results
+LOCAL_TEST_LOG.txt
+TEST_RESULTS.md
+*.zip
+*.tar.gz

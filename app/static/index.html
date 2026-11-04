@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verilog Agent · Trusted Counter MVP</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">⎍</span> Verilog Agent
+    <small>NL → dut.v → trusted TB + host oracle · Restricted verification MVP</small></div>
+  <div id="mode" class="badge">…</div>
+</header>
+<main>
+  <section class="left">
+    <label for="req">Describe a module (MVP: synchronous 4-bit counter)</label>
+    <textarea id="req" rows="4" placeholder="4-bit sync up-counter with reset + enable"></textarea>
+    <div id="demos" class="chips"></div>
+    <div class="row">
+      <button id="run" class="primary">Design &amp; verify</button>
+      <button id="probe" title="Hostile probes inside the same sandbox profile">Prove containment</button>
+    </div>
+    <p class="muted" id="trustnote">PASS/FAIL comes only from host <code>verdict.py</code>. The LLM never owns the testbench or oracle.</p>
+    <h3>Agent timeline</h3>
+    <ol id="timeline"></ol>
+    <div id="sandboxinfo" class="sandboxinfo"></div>
+  </section>
+  <section class="right">
+    <div id="verdict" class="verdict hidden"></div>
+    <div id="attemptTabs" class="attemptTabs"></div>
+    <div class="tabs">
+      <button data-tab="wave" class="active">Waveform</button>
+      <button data-tab="rtl">dut.v</button>
+      <button data-tab="tb">Trusted TB</button>
+      <button data-tab="log">Sim / protocol</button>
+      <button data-tab="verdictj">Host verdict</button>
+      <button data-tab="notes">Notes</button>
+    </div>
+    <div class="panel" id="panel-wave">
+      <div class="wavetools">zoom <input id="zoom" type="range" min="1" max="20" value="1">
+        <a id="pnglink" target="_blank" class="hidden">PNG ↗</a></div>
+      <div id="wave" class="wave"><p class="muted">Run a design to see its waveform.</p></div>
+    </div>
+    <pre class="panel hidden" id="panel-rtl"></pre>
+    <pre class="panel hidden" id="panel-tb"></pre>
+    <pre class="panel hidden" id="panel-log"></pre>
+    <pre class="panel hidden" id="panel-verdictj"></pre>
+    <pre class="panel hidden" id="panel-notes"></pre>
+    <div id="probeOut" class="hidden"></div>
+  </section>
+</main>
+<footer>LLM: Vultr-compatible (MOCK clearly marked until a live response) · Host-owned oracle · Isolated Docker runner · MIT</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

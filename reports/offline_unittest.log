@@ -1,0 +1,26 @@
+test_durable_inference_budget (test_security.ConfigBudgetTests.test_durable_inference_budget) ... ok
+test_mock_health_and_private_basic_auth (test_security.ConfigBudgetTests.test_mock_health_and_private_basic_auth) ... ok
+test_private_downgrades_fail_on_startup (test_security.ConfigBudgetTests.test_private_downgrades_fail_on_startup) ... ok
+test_private_mock_requires_password (test_security.ConfigBudgetTests.test_private_mock_requires_password) ... ok
+test_production_downgrades_fail_on_startup (test_security.ConfigBudgetTests.test_production_downgrades_fail_on_startup) ... ok
+test_backend_image_stages_every_pinned_file (test_security.PolicyTests.test_backend_image_stages_every_pinned_file) ... ok
+test_correct_ansi_interface (test_security.PolicyTests.test_correct_ansi_interface) ... ok
+test_forbidden_before_execution (test_security.PolicyTests.test_forbidden_before_execution) ... ok
+test_preflight_reject_never_calls_runner (test_security.PolicyTests.test_preflight_reject_never_calls_runner) ... ok
+test_pinned_images_and_container_label (test_security.PublicMockSecurityTests.test_pinned_images_and_container_label) ... ok
+test_public_concurrency_cap (test_security.PublicMockSecurityTests.test_public_concurrency_cap) ... ok
+test_public_http_only_fixed_demo_ids (test_security.PublicMockSecurityTests.test_public_http_only_fixed_demo_ids) ... ok
+test_public_rate_limit (test_security.PublicMockSecurityTests.test_public_rate_limit) ... ok
+test_public_startup_restrictions (test_security.PublicMockSecurityTests.test_public_startup_restrictions) ... ok
+test_bad_transport_frames (test_security.RunnerFrameTests.test_bad_transport_frames) ... ok
+test_edited_oracle_fails_integrity (test_security.VerdictTests.test_edited_oracle_fails_integrity) ... ok
+test_exit_and_timeout_never_pass (test_security.VerdictTests.test_exit_and_timeout_never_pass) ... ok
+test_manifest_bypass_forbidden_even_development (test_security.VerdictTests.test_manifest_bypass_forbidden_even_development) ... ok
+test_protocol_mutations_never_pass (test_security.VerdictTests.test_protocol_mutations_never_pass) ... ok
+test_stdout_pass_not_authoritative (test_security.VerdictTests.test_stdout_pass_not_authoritative) ... ok
+test_synthetic_protocol_fixture_only (test_security.VerdictTests.test_synthetic_protocol_fixture_only) ... ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 0.204s
+
+OK

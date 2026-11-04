@@ -1,0 +1,1337 @@
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..97bd47f
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,17 @@
++.git
++.env
++.env.*
++!.env.example
++state
++review_inputs
++__pycache__
++*.pyc
++*.sqlite
++*.db
++.venv
++.pytest_cache
++results
++LOCAL_TEST_LOG.txt
++TEST_RESULTS.md
++*.zip
++*.tar.gz
+diff --git a/.env.example b/.env.example
+index fd01911..0a04109 100644
+--- a/.env.example
++++ b/.env.example
+@@ -20,3 +20,11 @@ MODEL=deepseek-v4.1-flash-1017
+ LIVE_INFERENCE_MAX_CALLS=0
+ MAX_ATTEMPTS=4
+ SANDBOX_MAX_PARALLEL=2
++
++# Public demo EXPLICIT opt-in only; launch via ./deploy.sh --public-mock
++# APP_ENV=public_mock ; PUBLIC_BIND_HOST=0.0.0.0 ; PUBLIC_MOCK_ACK=1
++# Requires MOCK_LLM=1, VULTR_INFERENCE_API_KEY empty, verified rootless Docker.
++PUBLIC_MOCK_ACK=0
++PUBLIC_RATE_LIMIT_PER_MIN=6
++PUBLIC_GLOBAL_LIMIT_PER_MIN=60
++PUBLIC_MAX_ACTIVE_JOBS=2
+diff --git a/.github/workflows/verify.yml b/.github/workflows/verify.yml
+index 1517d46..658c7da 100644
+--- a/.github/workflows/verify.yml
++++ b/.github/workflows/verify.yml
+@@ -14,3 +14,17 @@ jobs:
+         run: python -m trusted.verify_manifest
+       - name: Run offline adversarial tests
+         run: python -m unittest discover -s tests -v
++
++      - name: Backend and frontend syntax
++        run: |
++          python -m compileall -q app sandbox trusted scripts tests
++          node --check app/static/app.js
++          bash -n deploy.sh
++  docker-containment-regression:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: Build pinned sandbox image
++        run: docker build -t verilog-sandbox:local ./sandbox
++      - name: Real Docker counter/sentinel/chaos regression (host asserts, no self-signoff)
++        run: python3 -m scripts.real_sandbox_regression
+diff --git a/Dockerfile b/Dockerfile
+index c283ce9..ffec2dc 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,6 +1,6 @@
+ # Backend (FastAPI). It never executes generated code itself: it only launches the
+ # locked-down sandbox image through app/docker_wrapper.py (fixed argv, no shell).
+-FROM python:3.12-slim-bookworm
++FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
+ ARG DOCKER_CLI_VERSION=27.3.1
+ ADD https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz /tmp/docker.tgz
+ RUN tar xzf /tmp/docker.tgz --strip-components=1 -C /usr/local/bin docker/docker && rm /tmp/docker.tgz
+@@ -15,6 +15,8 @@ COPY sandbox ./sandbox
+ COPY Dockerfile ./Dockerfile
+ COPY docker-compose.yml ./docker-compose.yml
+ COPY deploy.sh ./deploy.sh
++COPY scripts ./scripts
++COPY VERSIONS ./VERSIONS
+ ENV PYTHONUNBUFFERED=1 MPLCONFIGDIR=/tmp/mpl PYTHONPATH=/srv
+ EXPOSE 8000
+-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
++CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", ""]
+diff --git a/PATCH_REPORT_CN.md b/PATCH_REPORT_CN.md
+index 64f47a0..5a6e8bc 100644
+--- a/PATCH_REPORT_CN.md
++++ b/PATCH_REPORT_CN.md
+@@ -1,115 +1,32 @@
+-# Verilog Agent Counter MVP · P0/P1 修补与验收报告
++# Counter MVP v3 修补记录（不签发独立 PASS）
+ 
+-**交付日期：** 2026-11-04
+-**依据：** `GPT_CODE_REVIEW.md`（全文审阅）、`CODE_REVIEW_PACK.md`、`src/` 原始快照。
+-**范围：** 只限 `counter4_sync_v1`。 **本报告不宣称 RTL 已通过独立真实仿真验收、线上 Vultr 推理或 LabLab 审核。有限向量不能证明 RTL 在所有输入情况下正确。**
++基线：v2 本地修补包。此次为代码与审查文档增量，**未运行 Docker/Icarus、未部署 Vultr、未调用真实 Inference、未向 LabLab 提交**。
+ 
+-## A. 补丁计划与执行顺序
++## 逐项结果
+ 
+-| 优先级 | 问题 | 处理 | 文件 | 验收命令 |
+-|---|---|---|---|---|
+-| P0 | 编译前无 preflight | 采纳，禁止非法 RTL 到达 runner，保留 verdict 二次校验 | `trusted/preflight.py`, `trusted/lint_rtl.py`, `app/agent.py`, `trusted/verdict.py` | `python3 -m unittest tests.test_security.PolicyTests -v`（或 discover） |
+-| P0 | 后端 Docker socket 控制面 | 采纳，限定私有操作者/本机 SSH 隧道/Basic Auth/固定 argv；公网强制 rootless，公开部署脚本不提供 | `app/main.py`, `app/config.py`, `docker-compose.yml`, `app/docker_wrapper.py`, `deploy.sh` | private config 单测；在私有 VM 执行 `python3 -m scripts.real_sandbox_regression` |
+-| P0 | Manifest 部署自动刷新 | 采纳，改为只读校验；19 个关键资产固定 hash 并加入源码包及 CI | `trusted/manifest.json`, `trusted/verdict.py`, `trusted/verify_manifest.py`, `deploy.sh`, `.github/workflows/verify.yml` | `python3 -m trusted.verify_manifest`；篡改 oracle 单测 |
+-| P0 | 伪造 PASS/协议/输出 | 采纳，强限制 RTL，严格 VLTB1 顺序、宽度/键集合、nonce、长度、X/Z、结束状态、runner frame | `trusted/lint_rtl.py`, `trusted/verdict.py`, `app/sandbox.py`, `sandbox/runner.py`, `tests/test_security.py` | `python3 -m unittest discover -s tests -v` |
+-| P1 | 降级开关 | 采纳，`APP_ENV=private/production` 启动即拒绝 local sim、skip manifest；生产拒绝 mock | `app/config.py`, `app/main.py`, `app/agent.py` | `ConfigBudgetTests` |
+-| P1 | Inference 信用熔断与模式真实性 | 采纳，持久请求次数预算，真实响应前不标记 live | `app/budget.py`, `app/llm.py`, `app/static/app.js`, `CREDIT_SAFETY.md` | `test_durable_inference_budget` + 私有 VM mock E2E |
+-| P1 | 容器退出/清理证明 | 采纳，`docker rm -f` 后检查无同名容器；清理不确定不能按成功传递 | `app/docker_wrapper.py`, `app/sandbox.py` | Docker real regression，检查 `cleanup=True` |
+-| P1 | 安全声称过强 | 采纳，UI 改为“局部探针成功不等于安全证明”；探针异常作为 inconclusive | `sandbox/probe.py`, `app/static/app.js`, `README.md` | 私有 VM `/api/probe` |
+-| P1 | MIT LICENSE | 采纳，增加文件；正式提交仍需公共仓库和比赛规则复核 | `LICENSE` | `test -f LICENSE` |
+-
+-## B. 完整补丁与边界
+-
+-补丁源文件见 `src/`；针对原始快照的完整统一 diff 见 `VERILOG_AGENT_COUNTER_MVP.patch`。不包含外部依赖或凭证。
+-
+-**P0-1：Preflight 顺序。** `app/agent.py` 在 `sandbox.run_sim` **之前** 调用 `preflight.validate()`；拒绝时生成宿主 FAIL 记录，但没有 sandbox 事件。`verdict.judge` 仍做 `static_lint`、接口和 manifest 二次校验。只允许单一 `dut`、ANSI 精确端口、无系统任务/字符串/宏/延时、RTL ≤16KiB。
+-
+-**P0-2：控制面。** Compose 默认仅绑定 `127.0.0.1:8000`；私有/生产必须 HTTP Basic Auth；Docker socket 路径由操作者明示指定，沙箱仍无 socket、无网、有限资源，Docker 启动 argv 固定。私有 VM 可以由操作者在隔离资产上接受 rootful daemon 残余风险；公网/production 在启动时探测 rootless daemon，且本交付的 `deploy.sh` 故意不支持向公网部署。**不宣称 socket 风险已彻底消除。**
+-
+-**P0-3：Manifest。** `trusted/manifest.json` 在本补丁制作时更新一次，以匹配交付版本的 19 个 pinned 源文件。此动作不是部署步骤。`deploy.sh` 首先验证 `.env` 安全边界，然后执行只读 `python -m trusted.verify_manifest`；任何 oracle/TB/verdict 等受保护文件单改不改受审 manifest 均会失败。受审 manifest 必须由仓库管理员审核并与源码一起 Git commit；尚未被 CI 签名。
+-
+-**P0-4：负面测试。** `tests/test_security.py` 用宿主生成的**合成协议轨迹**对 parser/oracle 进行变异测试。它们测试 verdict 逻辑，**不能代替真实 Icarus 仿真**。脚本 `scripts/real_sandbox_regression.py` 专供具备 Docker 的私有 VM 跑真实正反计数器。`scripts/private_accept.py` 专供运行中的私有后端检查实际 mock→Docker→host oracle→repair。
+-
+-**P1：Runner。** 限制 stdin JSON 大小、精确文件名及 top、stdout 外层格式与体积；VLTB1 禁止嵌套 `@@RESULT@@`；只接受全套 87 条 `IN/PRE/POST`，拒绝重复、顺序错误、未知、缺失、X/Z 或宽度错。runner `ok` 不参与 host verdict。额外文字 `PASS` 不能独立构成成功。
+-
+-### 采纳／暂不采纳／理由／验收
+-
+-| 审查建议 | 决策 | 理由 | 改动/验收 |
++| 用户要求 | 修改位置 | 当前可确认事项 | VM 待验 |
+ |---|---|---|---|
+-| 运行前 lint + hash | 采纳 | 原调用顺序确有漏洞 | `app/agent.py`、`trusted/preflight.py`；零 `run_sim` 用例 |
+-| 严格协议 + 输出上限 | 采纳 | 防伪造/缺项/耗尽内存 | `trusted/verdict.py`, `app/sandbox.py`；协议变异单测 |
+-| 生产降级 fail-closed | 采纳 | 避免容器隔离被意外关闭 | `app/config.py`；启动配置单测 |
+-| Manifest 部署只验证 | 采纳 | 禁止同流程自我批准新基线 | `deploy.sh`, `trusted/verify_manifest.py`；oracle 篡改单测 |
+-| Docker socket 强隔离 | 部分采纳 | 无法在无 VM 情况下证明 rootless 实际运行；私有 VM 仅限管理员、loopback、认证；公网禁止默认开放 | `docker-compose.yml`, `app/config.py`; 私有 VM 另做 rootless 检测 |
+-| gVisor 作为强制默认 | 暂不采纳 | 当前只承诺 runc 隔离配置；未声称 gVisor 已部署，必须按真实运行时标注 | `SANDBOX_RUNTIME`/`REQUIRE_GVISOR`; 私有 VM 运行时核对 |
+-| CI-signed manifest | 暂不采纳 | MVP 不具备外部签名基础设施；Git review + CI hash 为阶段性边界 | `.github/workflows/verify.yml`；未来可增加签名 |
+-| pin Docker 镜像 digest | 暂未完成 | 未联网核实真实 digest，不能凭空编造 | `Dockerfile`/`sandbox/Dockerfile`; 公网前补充 |
+-| host-only sentinel | 暂未完成 | 需在专门 VM 执行、当前无 Docker/宿主可验证资源 | 私有 VM 增补探针及销毁证据 |
+-| UART/FIFO/FSM | 暂不采纳 | Counter MVP 范围固定，避免扩大验证面 | 无；不得宣传已支持 |
+-
+-## C. 本地实际执行与私有 VM 待执行
+-
+-### 已执行（交付环境，无 Docker/Icarus）
+-
+-```bash
+-python3 -m trusted.verify_manifest
+-# MANIFEST_OK: counter4_sync_v1 19 assets
++| 重新整理测试证据、删除 review_inputs | `TEST_RESULTS.md`；移除 `review_inputs/` | 报告区分离线与真实 Docker；文件夹已不在源码包 | 无 |
++| Host sentinel + chaos TB + label + regression | `sandbox/probe.py`, `trusted/chaos_tb.sv`, `app/docker_wrapper.py`, `scripts/real_sandbox_regression.py` | 源码与测试路径齐备，容器标签和拒绝协议有离线测试 | 主机 token、10 个探针、chaos、docker ps 标签清理 |
++| 两个 FROM digest 与 Icarus 版本 | `Dockerfile`, `sandbox/Dockerfile`, `VERSIONS` | 按用户提供 digest 精确写入，Icarus 记录 `11.0-1.1` | 确认镜像可拉取并检查安装版本 |
++| README lint/socket 风险 | `README.md` | 如实声明 regex lint 非安全沙箱，docker.sock 是控制面残余风险 | 审核 VM 上的 daemon 权限 |
++| 公开 MOCK 固定 Demo | `app/config.py`, `app/main.py`, `app/agent.py`, `app/static/app.js`, `deploy.sh`, `docker-compose.yml`, `scripts/public_mock_accept.py` | 仅固定 ID、限流、并发、关 Swagger/Probe、rootless/显式开关、防降级均有单测 | 公网 VM 安全和真实 HTTP 验收 |
+ 
+-python3 -W error::ResourceWarning -m unittest discover -s tests -v
+-# Ran 16 tests ... OK
+-node --check app/static/app.js
+-python3 -m compileall -q app trusted sandbox scripts tests
+-```
++## 受审文件与验收
+ 
+-**解释：** 16 个单测覆盖：合成轨迹的 oracle/解析正确性和篡改拒绝；preflight 零执行；恶意 `$display` / 注入协议 / 错端口 / 宏 / delay / 大文件拒绝；重复、缺失、重排、X/Z、异常宽度/nonce/exit/timeout；无效 runner frame；生产禁用降级；私有认证；持久 call count 预算。这只是**实现回归，不是独立的真实 RTL PASS 证据**。
++`trusted/manifest.json` 已随本次源码变更单独更新并固定 **26 个文件**（部署期间不允许生成新 hash）。所有受审代码和当前 manifest 应当**一起进入经过审核的 Git commit**，否则无法形成固定基线。
+ 
+-### 必须在私有 VM 执行（当前未执行）
++离线命令：
+ 
+ ```bash
+-# 提前人工确认 Vultr 信用不会溢出到银行卡；否则不要新建付费 VM。
+-cp .env.example .env
+-chmod 600 .env
+-# 修改: APP_BASIC_PASSWORD, DOCKER_HOST_SOCKET; 保持 MOCK_LLM=1。
+ python3 -m trusted.verify_manifest
+-./deploy.sh
+-set -a; . ./.env; set +a
+-python3 -m scripts.real_sandbox_regression
+-python3 -m scripts.private_accept
+-# 或: ./scripts/private_accept.sh
+-```
+-
+-真实 Docker 命令测试：好 counter、错误 en、异步 reset、错误 wrap、X 输出；并应观察容器销毁状态。HTTP mock E2E：一次好例、一次坏后修复，最终 reason 取自宿主 `verdict`。**必须保存实际 VM 输出后，再由独立验收者决定是否放行。**
+-
+-### 破坏性校验（在临时副本，不要直接改受审生产仓库）
+-
+-```bash
+-printf '\n# tamper\n' >> trusted/oracle.py
+-python3 -m trusted.verify_manifest   # 必须退出非零
+-# 不要运行 deploy 或改写 manifest 来掩盖差异；重新 checkout 受审文件。
++python3 -m unittest discover -s tests -v
++node --check app/static/app.js
++bash -n deploy.sh
+ ```
+ 
+-## D. 私有 VM 与公网 Demo 边界
+-
+-| 维度 | 私有 VM 验收 | 公网 Demo / production |
+-|---|---|---|
+-| HTTP 监听 | 仅 127.0.0.1，通过 SSH 隧道 | **当前不提供部署方案** |
+-| 访问主体 | 授权维护者、Basic Auth | 未授权访问必须禁止，仍需独立审计 |
+-| Docker socket | 维护者选定显式路径，优先 rootless；rootful 风险需人工接受 | 必须实际验证 rootless，建议隔离 launcher / socket proxy |
+-| 模拟推理 | 允许 `MOCK_LLM=1`，UI 必须注明 mock | 不得伪装为 live；production 启动拒绝 mock |
+-| local simulation | 严禁 | 严禁 |
+-| skip manifest | 严禁 | 严禁 |
+-| 运行时 | runc 或已部署的 runsc，必须如实标注 | 若宣称 gVisor，强制 runsc 并验证 |
+-| Host PASS | 只由可信 Oracle 判定 | 同左，不能由 LLM 判定 |
+-| 信用额度 | 无账户计费硬上限就不能保证不扣银行卡 | 同左；上线前再审查费用/网关 |
+-| 当前交付状态 | **代码修补完成，VM 实测待执行** | **未放行** |
+-
+-## E. 明确未做项与验收责任
++真实 Docker 私有 VM：`./deploy.sh`，随后 `python3 -m scripts.real_sandbox_regression`、`python3 -m scripts.private_accept`。
+ 
+-1. **未运行** Icarus/Docker 真实仿真（本容器没有 `docker`/`iverilog`/`vvp`）。需私有 VM 实测并保留日志。
+-2. **未调用** Vultr Serverless Inference；无真实生成→宿主诊断→修复的网络调用证据。没有有效 key 时只允许 mock；mock 不等于 live。
+-3. **未创建** VM、公网 Demo、DNS、GitHub 仓库或 LabLab 提交；未录视频/制作 slides。
+-4. **未能证明** Vultr 账户余额/信用金扣完不会自动扣卡；代码 call 预算仅限制调用次数，不能替代提供商层面的**金额硬上限**。详见 `CREDIT_SAFETY.md`。
+-5. **未完成** gVisor 验证、主机 sentinel、rootless VM 真实测试、镜像 digest、CI 签名、全源码外部安全审计。
+-6. **未实现** UART TX / FIFO / FSM；只支持 Counter。原始 docs 目录中的图和日志是历史样例，不是本补丁新增验收证据。
++独立公开 MOCK VM：`APP_ENV=public_mock` + `MOCK_LLM=1` + 无 API key + rootless Docker + 允许显式公网绑定后 `./deploy.sh --public-mock`；随后 `python3 -m scripts.public_mock_accept`。
+ 
+-**交付结论：** 可供独立工程师在受控私有 VM 上执行上述验收程序；**不自行签发安全 PASS、不宣称线上/评委验收成功**。
++**没有自动扣费脚本**；操作者自行确认 Vultr 信用金硬上限，不能把代码里的调用计数器当作不会扣银行卡的保证。`TEST_RESULTS.md` 是当前已执行命令的真实摘要，不是 VM PASS 证明。
+diff --git a/PUSH_INSTRUCTIONS.md b/PUSH_INSTRUCTIONS.md
+new file mode 100644
+index 0000000..457f198
+--- /dev/null
++++ b/PUSH_INSTRUCTIONS.md
+@@ -0,0 +1,16 @@
++# Publish to GitHub when the repository connection has write permission
++
++Target: https://github.com/sususu-su11/verilog-agent-counter-mvp
++
++This delivery includes a local Git commit and a Git bundle, but the connected GitHub integration currently reports `push: false` for this repository. The remote is an empty repository at inspection time. The attempted direct Git push returned exit 128 (`Could not resolve host: github.com`); no successful remote push is claimed.
++
++To publish from a machine with authorized GitHub write credentials, either extract the ZIP and initialize a new Git repo, or import the included bundle:
++
++```bash
++git clone -b main verilog-agent-counter-mvp-v3.bundle verilog-agent-counter-mvp
++cd verilog-agent-counter-mvp
++git remote add origin https://github.com/sususu-su11/verilog-agent-counter-mvp.git
++git push -u origin main
++```
++
++If the remote is no longer empty, inspect/merge its existing commits first. Do not force-push or overwrite unrelated work. Only public MOCK fixed-ID deployment is documented; real Vultr inference and independent host PASS are not claimed.
+diff --git a/README.md b/README.md
+index 5d1b777..d5f3bfd 100644
+--- a/README.md
++++ b/README.md
+@@ -1,66 +1,76 @@
+-# Verilog Agent · Counter MVP · Private VM acceptance patch
++# Verilog Agent — Counter MVP (trusted verdict)
+ 
+-**Scope:** Synchronous 4-bit reset/enable counter ONLY. UART/FIFO/FSM remain unimplemented. Vultr Serverless Inference generates candidate `dut.v` (or `MOCK_LLM=1` returns canned RTL). The only verification decision is issued by `trusted/verdict.py`, comparing 87 frozen observations from a fixed testbench with a host oracle. The LLM never supplies the TB/oracle or a PASS verdict.
++## Status and scope
+ 
+-**Security caveat:** The entire app/backend can talk to a Docker daemon via a socket. The fixed-argument wrapper and Docker sandbox restrictions reduce risk, but a compromised backend may access the daemon. **This package is only for a private, operator-authenticated, isolated VM accessible through SSH port forwarding.** It is not a public hardened service and is not a security proof that the blast radius is literally zero.
++Only `counter4_sync_v1` is implemented. Vultr Serverless Inference can propose `dut.v` in a **private operator-only** deployment; trusted host `verdict.py` and fixed `tb_counter.sv` exclusively determine PASS/FAIL. `MOCK_LLM=1` exercises canned example RTL and an intentional bad-enable self-heal sequence; **MOCK is never live Vultr evidence**. UART/FIFO/FSM are not implemented.
+ 
+-## No-Vultr, no-Docker tests (already run for this patch)
++**This is not an audited public general-purpose RTL service.** The limited counter vectors do not establish formal correctness. Public demo mode is fixed MOCK cases only, not user code.
++
++## Local/offline checks
+ 
+ ```bash
+ python3 -m trusted.verify_manifest
+ python3 -m unittest discover -s tests -v
++python3 -m compileall -q app sandbox trusted scripts tests
++node --check app/static/app.js
++bash -n deploy.sh
+ ```
+ 
+-These tests use **synthetic VLTB1 fixtures**, mocked LLM calls and an isolated budget database. They do not simulate Verilog and do not establish readiness on a real VM.
+-
+-## Private VM, real Docker simulator, MOCK LLM
++These tests use synthetic fixtures; they are **not** Docker isolation evidence or Icarus simulation. See `TEST_RESULTS.md`.
+ 
+-Provision the disposable VM **manually** only after you confirm that VM/build costs are within your remaining Vultr credit and cannot charge your linked card. No script in this package provisions paid resources.
++## Private VM deployment (no cloud resources created by these scripts)
+ 
+-Install Docker and Docker Compose independently, ideally rootless Docker for the operator account. Verify an explicit accessible daemon socket (`/run/user/<uid>/docker.sock` for rootless). Clone the patched source into a Git repo, and review/commit `trusted/manifest.json` together with the audited source revision. Never generate fresh hashes as part of deployment.
++Requires Docker + Compose on a dedicated disposable VM. Prefer an isolated **rootless** Docker daemon and inspect the selected socket. Provision VM manually **only if provider-level spending safeguards prevent charges outside remaining credit**; inference request count caps are not dollar caps.
+ 
+ ```bash
+ cp .env.example .env
+ chmod 600 .env
+-# Replace APP_BASIC_PASSWORD with 24+ truly random characters.
+-# Set DOCKER_HOST_SOCKET to the verified Docker socket.
+-# Keep APP_ENV=private, MOCK_LLM=1, USE_LOCAL_SIM=0, SKIP_MANIFEST=0.
+-python3 -m trusted.verify_manifest
++# APP_ENV=private; PUBLIC_BIND_HOST=127.0.0.1; MOCK_LLM=1
++# Set a strong APP_BASIC_PASSWORD and accurate DOCKER_HOST_SOCKET.
++# USE_LOCAL_SIM=0; SKIP_MANIFEST=0.
+ ./deploy.sh
+-```
+-
+-`deploy.sh` verifies the manifest, validates startup configuration, builds the sandbox and backend, and binds **only** `127.0.0.1:8000` on the VM. It does **not** install Docker, open a public firewall, request cloud resources or run Vultr Inference. Use an SSH tunnel from your own computer:
+-
+-```bash
+ ssh -L 8000:127.0.0.1:8000 operator@PRIVATE_VM_IP
+ ```
+ 
+-Open `http://127.0.0.1:8000` and log in using `APP_BASIC_USER` and `APP_BASIC_PASSWORD`.
+-
+-On the VM, perform actual Docker simulation and the mock HTTP E2E:
++Use Basic Auth on `http://127.0.0.1:8000` via SSH tunnel. Actual VM regression (must be run and recorded by operator):
+ 
+ ```bash
+ set -a; . ./.env; set +a
+ python3 -m scripts.real_sandbox_regression
+ python3 -m scripts.private_accept
+-# Or: ./scripts/private_accept.sh
+ ```
+ 
+-The Docker regression executes correct, wrong-enable, asynchronous-reset, wrong-wrap and X-output counters; only the trusted host verdict may mark an RTL implementation PASS. The HTTP acceptance verifies mock good→host-verdict and mock bad→host-fail→mock-repair→host-verdict. These scripts require Docker + Icarus in the sandbox and **were not executed in the patch author's environment**.
++The real regression temporarily creates `/tmp/verilog-agent-host-sentinel/token` on **the host** (0600), runs the 10-probe containment suite and **trusted chaos TB** that tries to print forged `PASS`/`VLTB1`/`@@RESULT@@` strings and read the sentinel; it confirms cleanup of containers with `label=verilog-agent=1`. This script must run while no other verilog-agent sandbox jobs are active. The token is removed at completion. Without Docker/Icarus there is no real isolation proof.
+ 
+-## What is frozen
++## Public fixed MOCK mode — explicit opt-in only
+ 
+-`trusted/manifest.json` pins 19 reviewed assets including TB, vectors, oracle, verdict, lint/preflight, sandbox runner, Docker config and critical host control-plane code. `deploy.sh` **only verifies**, never rewrites hashes. CI runs the same check plus adversarial unit tests. An authorized reviewer must separately update and commit the manifest when source changes. Merely having a manifest in the same repository is not a signed supply-chain attestation.
++This is a minimal public **demonstration**, not a public submission service. Use a separate disposable rootless Docker VM, with firewall restrictions and careful cost monitoring. Set `.env` values:
++
++```dotenv
++APP_ENV=public_mock
++PUBLIC_BIND_HOST=0.0.0.0
++PUBLIC_MOCK_ACK=1
++MOCK_LLM=1
++VULTR_INFERENCE_API_KEY=
++USE_LOCAL_SIM=0
++SKIP_MANIFEST=0
++DOCKER_HOST_SOCKET=/run/user/1000/docker.sock
++PUBLIC_RATE_LIMIT_PER_MIN=6
++PUBLIC_GLOBAL_LIMIT_PER_MIN=60
++PUBLIC_MAX_ACTIVE_JOBS=2
++```
+ 
+-Any RTL without the exact ANSI-port interface or with system tasks, strings, macros, delays, multiple modules, non-ASCII, forbidden constructs, or over 16 KiB is rejected **before** `sandbox.run_sim()`. `trusted/verdict.py` repeats checks after simulation. `USE_LOCAL_SIM` and `SKIP_MANIFEST` are forbidden in private/production, and public/production also rejects mock mode, missing Vultr keys and non-rootless Docker.
++Then run **only** `./deploy.sh --public-mock`. Startup refuses missing opt-in, non-rootless Docker, configured inference credentials and downgraded sandbox/manifest controls. Direct `/api/jobs` calls must supply **only** `{ "demo_id": "counter" }` or `{ "demo_id": "counter_heal" }`; arbitrary requests, extra fields, unknown IDs and LLM-supplied RTL are rejected. `/docs`, `/redoc`, `/openapi.json` and `/api/probe` are disabled, with per-IP/global in-process throttles, active-job slots (max 2) and underlying sandbox parallel limit. UI text input is read-only and selected examples are sent by ID.
+ 
+-## Modes, evidence, and credit
++Check HTTP restrictions on the running public demo: `python3 -m scripts.public_mock_accept`. The public interface uses one Uvicorn worker (in-process rate limits are **not distributed**). Put additional request/body quotas and abuse protection at a trusted edge if publicly exposed. Do **not** accept proxy `X-Forwarded-For` as proof of client IP. Read/write access to the Docker socket remains a critical control-plane risk even with rootless Docker; keep the VM disposable and minimally privileged.
+ 
+-- `MOCK_LLM=1`: **MOCK**, no inference API calls. Local/VM simulation can still be real Icarus execution; never label that as live Vultr generation.
+-- Configured Vultr key: UI indicates **configured, not yet verified** until an HTTP inference response has actually arrived.
+-- Live mode requires explicit `LIVE_INFERENCE_MAX_CALLS > 0` and persistent `INFERENCE_LEDGER_PATH`; the ledger decrements before each HTTP call, including retry attempts.
+-- **No account-level monetary guarantee exists in this code.** Credit exhaustion may not stop the provider from charging a linked card. Do not enable paid usage without a separately verified provider-level hard limit. See `CREDIT_SAFETY.md`.
++## Known limits / security boundary
+ 
+-## Submission and scope boundaries
++1. **Regex/static lint is not a complete SystemVerilog parser or sandbox.** It blocks known system tasks, `initial`, strings, directives, etc. before `run_sim`, but future grammar escapes and Icarus/Verilator parser vulnerabilities are not ruled out. Execute only in the restricted Docker container; keep tools patched. A genuine malicious RTL attempt must never be directly compiled on the host.
++2. **Docker daemon socket** is mounted in the backend, not the sandbox. The fixed-argv wrapper constrains normal paths but backend RCE could access the daemon; rootless reduces but does not eliminate damage. Public demo reduces attacker-controlled inputs, does not prove blast radius zero. This is **not recommended for arbitrary untrusted Internet code**.
++3. **Isolation evidence is empirical, not proof.** The 10 sandbox probes, host sentinel, chaos TB and labeled-container cleanup must run on the target VM. Until those run, containment status is unverified.
++4. **Supply chain:** both base `FROM` images are pinned to *operator-provided* SHA256 values (see `VERSIONS`; validate on target VM). The backend Docker CLI `ADD` downloads a versioned tarball from a URL **without a verified content digest**, and Apt packages have only Debian repository version semantics. `iverilog` bookworm version is recorded as `11.0-1.1` but is not yet runtime-verified.
++5. **Manifest:** `trusted/manifest.json` is part of the reviewed source. `deploy.sh` only checks hashes; changing the oracle without a separately reviewed manifest update fails. A Git-committed manifest is not a cryptographic signature.
++6. **Costs:** no code controls Vultr's account/card billing. `LIVE_INFERENCE_MAX_CALLS` is a durable **call-count** breaker for private live use, not a money-based limit. No live Inference, paid VM deployment, public URL, video or LabLab submission is claimed here.
+ 
+-Private VM Docker acceptance, live Vultr smoke test, external pentest, published repository, public demo URL, MIT submission, slides and recorded video are **not established by this patch**. A MIT `LICENSE` file is included, but no GitHub repository or LabLab submission was created. `SANDBOX_RUNTIME=runsc` is optional for private testing; selecting `runc` must be described honestly. For publicly accessible deployments, further hardening, independently validated rootless daemon, supply-chain pinning and external review are required. See `PATCH_REPORT_CN.md` for the full A–E checklist.
++`LICENSE`: MIT. See `PATCH_REPORT_CN.md` for scope, acceptance boundaries, and `CREDIT_SAFETY.md` before using live inference.
+diff --git a/TEST_RESULTS.md b/TEST_RESULTS.md
+index 1cef679..4e1c9b9 100644
+--- a/TEST_RESULTS.md
++++ b/TEST_RESULTS.md
+@@ -1,40 +1,70 @@
+-# Local patch verification evidence — 2026-11-04
++# Counter MVP v3 — 实际测试记录
+ 
+-**Scope:** Code-level regression only; not VM deployment or independent functional RTL sign-off.
++**2026-11-04 | 仅代码级离线验证 | 不签发自主 PASS**
+ 
+-## Executed on this build machine
++本文件已重写，取代 v2 报告。以下命令在本次提供补丁的本地执行环境内实际执行；它们**不能**证明隔离 VM、真实 Docker/Icarus 仿真或 Vultr Serverless Inference 成功。
++
++## 已执行命令和实际输出
+ 
+ ```text
+-python3 -m trusted.verify_manifest
+-MANIFEST_OK: counter4_sync_v1 19 assets
++$ python3 -m trusted.verify_manifest
++MANIFEST_OK: counter4_sync_v1 26 assets
+ 
+-python3 -W error::ResourceWarning -m unittest discover -s tests -v
+-Ran 16 tests in 0.211s
++$ python3 -W error::ResourceWarning -m unittest discover -s tests -v
++Ran 21 tests in 0.224s
+ OK
+ 
+-node --check app/static/app.js
+-(no syntax errors)
++$ node --check app/static/app.js
++(exit 0, no output)
+ 
+-python3 -m compileall -q app trusted sandbox scripts tests
+-(no syntax errors)
++$ bash -n deploy.sh
++(exit 0, no output)
+ 
+-# Reapply complete patch on the original uploaded src snapshot
++$ python3 -m compileall -q app trusted sandbox scripts tests
++(exit 0, no output)
+ 
+-git apply --check --whitespace=error VERILOG_AGENT_COUNTER_MVP.patch
+-Patch reapplication matches full source: True; mismatches: []
++$ test ! -d review_inputs
++(exit 0 — directory absent)
+ 
+-# Run tests on that separately patched copy
+-python3 -m trusted.verify_manifest
+-MANIFEST_OK: counter4_sync_v1 19 assets
+-python3 -m unittest discover -s tests -v
+-Ran 16 tests in 0.212s
+-OK
++$ command -v docker
++(no executable)
++$ command -v iverilog
++(no executable)
+ ```
+ 
+-Tests cover preflight-with-zero-run_sim on malicious `$display`, forged protocol/runner marker cases, strict VLTB1 consistency, unexpected output/width/nonce, X/Z, missing/duplicate/reordered records, nonzero/timeout, strict manifest, oracle tamper detection, invalid private/production flags, HTTP mock health, Basic Auth, and durable inference-call budget.
++上述 21 项是离线 Python unittest，含 16 项原有策略/伪造协议/接口与账本检查，以及 5 项公开 MOCK 新测试（固定 demo ID 与 API 禁止项、限流、并发槽、生产启动限制、digest/标签静态检查）。`test_synthetic_protocol_fixture_only` 的正例**是 Python 合成轨迹，不是真实 RTL 通过**。完整 unittest 控制台日志可另附 `v3_unittest.log`。
++
++## 已实现但未在本机执行的真实回归
++
++需要具备 Docker、Icarus 的**专用 VM**，切勿以 MOCK 冒充 live inference。
++
++```bash
++# 先在 VM 设置并核实 .env，构建沙箱镜像、确保无其他正在运行的 Verilog Agent 作业
++./deploy.sh
++set -a; . ./.env; set +a
++python3 -m scripts.real_sandbox_regression
++python3 -m scripts.private_accept
++
++# 单独的公网 MOCK VM（不在私人 VM 上混用）
++# 确认 rootless Docker 和硬费用边界后：
++./deploy.sh --public-mock
++python3 -m scripts.public_mock_accept
++```
++
++`scripts.real_sandbox_regression` 必须证明：宿主在 `/tmp/verilog-agent-host-sentinel/token` 存放随机 token、容器不读取该文件；10 个隔离探针、trusted chaos TB 伪造 `PASS`/`VLTB1`/`@@RESULT@@` 不产生 host PASS；每次有 `verilog-agent=1` 标签的容器都销毁；正确及故障 counter 的独立 host verdict 符合预期。
++
++CI 增加了 `docker-containment-regression` job，但**当前未观察其 GitHub Actions 运行结果**；不能把 workflow 文件存在当作测试成功。这里没有 Docker 与 Icarus，所以真实容器探针是**未验收**。
++
++## 不得宣称的证据
++
++- 未确认 VM 部署、rootless 守护进程、实际映像拉取或安装在容器内的 `iverilog` 版本。
++- 未核验用户提供的两个基础镜像 digest 在目标 VM 可拉取（仅按指定值固定）。
++- 未执行公网可达性/滥用压力测试、宿主 Docker 控制面攻击测试。
++- 未调用 Vultr Inference，没有 live 推理流水线、费用保障、录屏或 LabLab 提交证明。
++- GitHub 远端可写性与推送结果应独立记录；本地测试不等于远端 CI 绿灯。
+ 
+-**Not executed:** actual Docker sandbox, Icarus/VVP, hosted private VM, production rootless validation, gVisor, external sentinel, Vultr Serverless Inference API, video or LabLab submission. The build machine did not have the executables `docker`, `iverilog`, or `vvp`. The positive parser fixture is synthetic; it is not proof of any real candidate's RTL correctness.
++**判定责任：** 独立维护者收集目标 VM 与 GitHub Actions 的真实日志后决定是否接受；本文件仅记录本地运行事实和待验项。
+ 
+-The engineer/owner must independently run `python3 -m scripts.real_sandbox_regression` and `python3 -m scripts.private_accept` on a manually provisioned isolated private VM with real Docker and `MOCK_LLM=1`, capture the outputs, and review before any acceptance. A limited counter vector suite cannot prove general RTL equivalence.
++## GitHub 发布尝试（单独于代码验收）
+ 
+-**Cost boundary:** no cloud resources were provisioned, no paid inference requests were issued. The durable call allowance limits request count, not monetary spend; provider/account-level hard cap remains unverified.
++目标 `sususu-su11/verilog-agent-counter-mvp`。GitHub 连接读取到仓库时权限为 `pull=true, push=false`；本地 Git 已生成 `main` 初始提交。执行 `GIT_TERMINAL_PROMPT=0 git push -u origin main` 返回 **exit 128**，错误为 `Could not resolve host: github.com`。远端没有完成推送，**不宣称 GitHub CI 已通过**。交付 `*.bundle` 可在拥有 GitHub 写权限/网络的机器上导入并推送，见 `PUSH_INSTRUCTIONS.md`。
+diff --git a/VERSIONS b/VERSIONS
+new file mode 100644
+index 0000000..a92d8f9
+--- /dev/null
++++ b/VERSIONS
+@@ -0,0 +1,6 @@
++# Reviewed version pins (operator-provided, not independently pulled on this machine)
++Debian base: debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
++Python base: python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
++iverilog (Debian bookworm): 11.0-1.1
++Version source: operator-provided VERIFY_DEADLINE_DIGESTS.md; VM build inspection required
++NOTE: Backend Docker CLI downloaded via an upstream URL, currently not content-hash pinned.
+diff --git a/app/agent.py b/app/agent.py
+index b489f9b..189ec9f 100644
+--- a/app/agent.py
++++ b/app/agent.py
+@@ -11,13 +11,19 @@ from pathlib import Path
+ from trusted import verdict as verdict_mod, preflight
+ from trusted.oracle import FAMILIES
+ 
+-from . import families, llm, prompts, sandbox, vcd
++from . import families, llm, prompts, sandbox, vcd, config
+ 
+ MAX_ATTEMPTS = max(1, min(4, int(os.environ.get("MAX_ATTEMPTS", "4"))))  # hard cap, 3 heals
+ MAX_REQUEST_CHARS = 2000
+ JOBS: dict = {}
+ _lock = threading.Lock()
+ SAMPLES = Path(__file__).resolve().parent.parent / "docs" / "samples"
++PUBLIC_MAX_ACTIVE = int(os.environ.get('PUBLIC_MAX_ACTIVE_JOBS', '2'))
++_public_slots = threading.BoundedSemaphore(PUBLIC_MAX_ACTIVE)
++
++
++class JobCapacityError(RuntimeError):
++    pass
+ 
+ 
+ def _event(job, kind, **data):
+@@ -174,7 +180,16 @@ def run(job):
+     _event(job, "done", msg=f"Gave up after {MAX_ATTEMPTS} attempts (host still FAIL)")
+ 
+ 
+-def start(request: str) -> dict:
++def start(request: str, *, public_demo_id: str | None = None) -> dict:
++    reserved_slot = False
++    if config.public_mock():
++        from .mock import DEMOS
++        known = {d['id']: d['prompt'] for d in DEMOS}
++        if public_demo_id not in known or request != known[public_demo_id]:
++            raise ValueError('public mock accepts only fixed demo ID/prompt')
++        if not _public_slots.acquire(blocking=False):
++            raise JobCapacityError('public demo capacity exhausted')
++        reserved_slot = True
+     request = request.strip()[:MAX_REQUEST_CHARS]
+     fam = families.detect_family(request)
+     job = {
+@@ -208,6 +223,15 @@ def start(request: str) -> dict:
+             job["status"] = "failed"
+             _event(job, "error", msg=f"internal error: {type(e).__name__}: {e}")
+             _event(job, "done", msg="aborted")
++        finally:
++            if reserved_slot:
++                _public_slots.release()
+ 
+-    threading.Thread(target=_wrap, daemon=True).start()
++    try:
++        threading.Thread(target=_wrap, daemon=True).start()
++    except BaseException:
++        if reserved_slot:
++            _public_slots.release()
++        JOBS.pop(job['id'], None)
++        raise
+     return job
+diff --git a/app/config.py b/app/config.py
+index 9c2dab7..c754f11 100644
+--- a/app/config.py
++++ b/app/config.py
+@@ -1,4 +1,4 @@
+-"""Fail-closed startup policy for private VM and public-production modes."""
++"""Fail-closed startup policy for private, live-production and public MOCK modes."""
+ from __future__ import annotations
+ import os
+ from pathlib import Path
+@@ -10,13 +10,38 @@ def enabled(name: str) -> bool:
+ 
+ 
+ def mode() -> str:
+-    return os.environ.get('APP_ENV', 'development').lower()
++    return os.environ.get('APP_ENV', 'development').strip().lower()
++
++
++def public_mock() -> bool:
++    return mode() == 'public_mock'
++
++
++def public_limits() -> tuple[int, int, int]:
++    """Bound resource usage even if an operator enters unreasonable settings."""
++    values = (int(os.environ.get('PUBLIC_RATE_LIMIT_PER_MIN', '6')),
++              int(os.environ.get('PUBLIC_GLOBAL_LIMIT_PER_MIN', '60')),
++              int(os.environ.get('PUBLIC_MAX_ACTIVE_JOBS', '2')))
++    if not (1 <= values[0] <= 30 and 1 <= values[1] <= 300 and 1 <= values[2] <= 2):
++        raise RuntimeError('unsafe public MOCK rate/concurrency limits')
++    return values
++
++
++def require_rootless() -> None:
++    import subprocess
++    try:
++        info = subprocess.run(['docker', 'info', '--format', '{{json .SecurityOptions}}'],
++                              capture_output=True, text=True, timeout=6, check=True)
++        if 'rootless' not in info.stdout.lower():
++            raise RuntimeError('Docker daemon is not rootless')
++    except (OSError, subprocess.SubprocessError) as exc:
++        raise RuntimeError('cannot prove rootless Docker daemon') from exc
+ 
+ 
+ def validate_startup() -> None:
+     m = mode()
+-    if m not in ('development', 'private', 'production'):
+-        raise RuntimeError('APP_ENV must be development/private/production')
++    if m not in ('development', 'private', 'production', 'public_mock'):
++        raise RuntimeError('APP_ENV must be development/private/production/public_mock')
+     from trusted.verdict import verify_manifest
+     try:
+         ok, _ = verify_manifest()
+@@ -27,28 +52,30 @@ def validate_startup() -> None:
+     if m == 'development':
+         return
+     if enabled('USE_LOCAL_SIM') or enabled('SKIP_MANIFEST'):
+-        raise RuntimeError('private/production disallow USE_LOCAL_SIM and SKIP_MANIFEST')
++        raise RuntimeError('restricted deployment disallows USE_LOCAL_SIM and SKIP_MANIFEST')
++    if enabled('REQUIRE_GVISOR') and os.environ.get('SANDBOX_RUNTIME') != 'runsc':
++        raise RuntimeError('REQUIRE_GVISOR needs SANDBOX_RUNTIME=runsc')
++    if m == 'public_mock':
++        if not enabled('MOCK_LLM') or os.environ.get('VULTR_INFERENCE_API_KEY', '').strip():
++            raise RuntimeError('public_mock requires MOCK_LLM=1 and no inference credentials')
++        if os.environ.get('PUBLIC_BIND_HOST', '127.0.0.1') != '0.0.0.0':
++            raise RuntimeError('public_mock requires explicit public bind host')
++        if not enabled('PUBLIC_MOCK_ACK'):
++            raise RuntimeError('public_mock requires operator PUBLIC_MOCK_ACK=1')
++        public_limits()
++        require_rootless()
++        return
+     password = os.environ.get('APP_BASIC_PASSWORD', '')
+     if (not os.environ.get('APP_BASIC_USER') or len(password) < 24 or
+             password.startswith('REPLACE_WITH_') or password.lower().startswith('changeme')):
+         raise RuntimeError('private/production require APP_BASIC_USER and 24+ character password')
+     if m == 'production' and (enabled('MOCK_LLM') or not os.environ.get('VULTR_INFERENCE_API_KEY')):
+         raise RuntimeError('production requires genuine Vultr inference; mock forbidden')
+-    if enabled('REQUIRE_GVISOR') and os.environ.get('SANDBOX_RUNTIME') != 'runsc':
+-        raise RuntimeError('REQUIRE_GVISOR needs SANDBOX_RUNTIME=runsc')
+     if m == 'production':
+-        import subprocess
+-        try:
+-            info = subprocess.run(['docker', 'info', '--format', '{{json .SecurityOptions}}'],
+-                                  capture_output=True, text=True, timeout=6, check=True)
+-            if 'rootless' not in info.stdout.lower():
+-                raise RuntimeError('Docker daemon is not rootless')
+-        except (OSError, subprocess.SubprocessError) as exc:
+-            raise RuntimeError('cannot prove rootless Docker daemon') from exc
+-    # This flag is a human attestation, NOT a technical proof; documented as such.
++        require_rootless()
+     if not enabled('MOCK_LLM') and os.environ.get('VULTR_INFERENCE_API_KEY'):
+         u = urlparse(os.environ.get('VULTR_INFERENCE_BASE_URL', 'https://api.vultrinference.com/v1'))
+-        if u.scheme != 'https' or u.hostname not in ('api.vultrinference.com',):
++        if u.scheme != 'https' or u.hostname != 'api.vultrinference.com':
+             raise RuntimeError('live LLM endpoint must be Vultr HTTPS')
+         if int(os.environ.get('LIVE_INFERENCE_MAX_CALLS', '0')) <= 0:
+             raise RuntimeError('live inference needs explicit positive request cap')
+@@ -58,6 +85,5 @@ def validate_startup() -> None:
+ 
+ 
+ def require_localhost_binding() -> None:
+-    """Called by private VM deploy, not an HTTP-server network sandbox."""
+     if mode() in ('private', 'production') and os.environ.get('PUBLIC_BIND_HOST', '127.0.0.1') != '127.0.0.1':
+-        raise RuntimeError('private deploy binds loopback; public rollout needs separate review')
++        raise RuntimeError('private deploy binds loopback')
+diff --git a/app/docker_wrapper.py b/app/docker_wrapper.py
+index a34b253..2a4edeb 100644
+--- a/app/docker_wrapper.py
++++ b/app/docker_wrapper.py
+@@ -53,6 +53,7 @@ def _flags(name: str) -> list[str]:
+         "--ulimit", "fsize=20000000:20000000",
+         "--env", "HOME=/work",
+         "--label", "verilog-agent.sandbox=1",
++        "--label", "verilog-agent=1",
+         "-i",
+     ]
+     if RUNTIME:
+diff --git a/app/main.py b/app/main.py
+index 4dd59d4..82be773 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -7,6 +7,7 @@ import binascii
+ import secrets
+ import sys
+ import time
++import threading
+ from collections import defaultdict, deque
+ from pathlib import Path
+ 
+@@ -18,21 +19,64 @@ if str(ROOT) not in sys.path:
+ from fastapi import FastAPI, HTTPException, Request
+ from fastapi.responses import FileResponse, Response
+ from fastapi.staticfiles import StaticFiles
+-from pydantic import BaseModel, Field
++from pydantic import BaseModel, Field, ConfigDict
+ 
+ from . import agent, llm, mock, sandbox, config
+ 
+ # Fail before the application begins serving HTTP requests.
+ config.validate_startup()
+ 
+-app = FastAPI(title="Verilog Agent", version="0.2.0")
++app = FastAPI(title="Verilog Agent", version="0.3.0",
++              docs_url=None if config.public_mock() else '/docs',
++              redoc_url=None if config.public_mock() else '/redoc',
++              openapi_url=None if config.public_mock() else '/openapi.json')
+ STATIC = Path(__file__).parent / "static"
+ RATE = int(os.environ.get("RATE_LIMIT_PER_MIN", "6"))
+ _hits: dict = defaultdict(deque)
++_global_hits = deque()
++_global_reads = deque()
++_hits_lock = threading.Lock()
++
++
++def public_rate_gate(request: Request) -> bool:
++    """In-process single-worker limiter; no XFF header trust. No external billing."""
++    per_ip, global_max, _ = config.public_limits()
++    is_write = request.method == 'POST'
++    # Polling (GET) must not exhaust the create-job (POST) quota.
++    max_ip = per_ip if is_write else 120
++    max_all = global_max if is_write else 2000
++    group = 'post' if is_write else 'read'
++    key = (group, request.client.host if request.client else '?')
++    now = time.monotonic()
++    with _hits_lock:
++        q = _hits[key]
++        global_q = _global_hits if is_write else _global_reads
++        for bucket in (q, global_q):
++            while bucket and now - bucket[0] >= 60:
++                bucket.popleft()
++        if len(q) >= max_ip or len(global_q) >= max_all:
++            return False
++        q.append(now)
++        global_q.append(now)
++    return True
+ 
+ 
+ @app.middleware('http')
+ async def private_auth(request: Request, call_next):
++    if config.public_mock():
++        if request.url.path in ('/docs', '/redoc', '/openapi.json', '/api/probe'):
++            return Response('Not found', status_code=404)
++        if request.url.path.startswith('/api/'):
++            if not public_rate_gate(request):
++                return Response('Public demo rate limit reached', status_code=429)
++            if request.method == 'POST' and request.url.path == '/api/jobs':
++                # Cap body while streaming, even if Content-Length is omitted.
++                body = bytearray()
++                async for chunk in request.stream():
++                    if len(body) + len(chunk) > 1024:
++                        return Response('Request too large', status_code=413)
++                    body.extend(chunk)
++                request._body = bytes(body)  # Starlette's cached body for downstream FastAPI
+     if config.mode() in ('private', 'production'):
+         header = request.headers.get('authorization', '')
+         allowed = False
+@@ -62,8 +106,10 @@ def _ratelimit(request: Request):
+ 
+ 
+ class RunReq(BaseModel):
+-    request: str = Field(default="")
++    model_config = ConfigDict(extra='forbid')
++    request: str = Field(default='', max_length=2000)
+     family: str | None = None
++    demo_id: str | None = Field(default=None, max_length=40)
+ 
+ 
+ @app.get("/api/health")
+@@ -93,6 +139,18 @@ def demos():
+ 
+ @app.post("/api/jobs")
+ def create_job(body: RunReq, request: Request):
++    if config.public_mock():
++        if body.model_fields_set != {'demo_id'} or not body.demo_id:
++            raise HTTPException(400, 'public mock requires demo_id only')
++        demos_by_id = {d['id']: d for d in mock.DEMOS}
++        demo = demos_by_id.get(body.demo_id)
++        if demo is None:
++            raise HTTPException(400, 'unknown fixed demo ID')
++        try:
++            job = agent.start(demo['prompt'], public_demo_id=demo['id'])
++        except agent.JobCapacityError as exc:
++            raise HTTPException(429, str(exc)) from exc
++        return {'id': job['id'], 'family': job['family'], 'inference_mode': 'MOCK'}
+     text = (body.request or "").strip()
+     if body.family == "counter" and not text:
+         text = mock.DEMOS[0]["prompt"]
+@@ -136,6 +194,8 @@ def wave_png(job_id: str, attempt: int = 0):
+ 
+ @app.post("/api/probe")
+ def probe(request: Request):
++    if config.public_mock():
++        raise HTTPException(404, 'not found')
+     _ratelimit(request)
+     if sandbox.USE_LOCAL:
+         raise HTTPException(400, "Containment probe requires Docker sandbox (USE_LOCAL_SIM unset).")
+diff --git a/app/static/app.js b/app/static/app.js
+index 2c8817c..be13475 100644
+--- a/app/static/app.js
++++ b/app/static/app.js
+@@ -1,10 +1,13 @@
+ const $ = (s) => document.querySelector(s);
+ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+ let state = { job: null, attempts: [], sel: 0, next: 0 };
++let isPublicMock = false;
++let selectedDemoId = "counter";
+ let trustedTbCache = "(host-owned — loaded per attempt from server events / static note)";
+ 
+ async function init() {
+   const h = await (await fetch("/api/health")).json();
++  isPublicMock = h.app_env === "public_mock";
+   const m = $("#mode");
+   m.textContent = h.mock_llm ? "MOCK LLM · counter demos" : `Vultr configured · NO LIVE EVIDENCE · ${h.model}`;
+   m.className = "badge mock";
+@@ -14,10 +17,18 @@ async function init() {
+   for (const d of demos) {
+     const b = document.createElement("button");
+     b.textContent = d.title;
+-    b.onclick = () => { $("#req").value = d.prompt; };
++    b.onclick = () => { selectedDemoId = d.id; $("#req").value = d.prompt; };
+     $("#demos").appendChild(b);
+   }
+   $("#req").value = demos[0].prompt;
++  selectedDemoId = demos[0].id;
++  if (isPublicMock) {
++    $("#req").readOnly = true;
++    $("#req").title = "Public MOCK: only select fixed demo IDs";
++    $("#mode").textContent += " · FIXED DEMOS ONLY · NO LIVE INFERENCE";
++    const btn = $("#probe");
++    if (btn) btn.disabled = true;
++  }
+ }
+ 
+ function addTimeline(cls, text, detail) {
+@@ -35,7 +46,7 @@ function setVerdict(cls, text) {
+ 
+ $("#run").onclick = async () => {
+   const req = $("#req").value.trim();
+-  if (!req) return;
++  if (!req && !isPublicMock) return;
+   $("#run").disabled = true;
+   $("#timeline").innerHTML = "";
+   $("#attemptTabs").innerHTML = "";
+@@ -43,7 +54,7 @@ $("#run").onclick = async () => {
+   state = { job: null, attempts: [], sel: 0, next: 0 };
+   setVerdict("run", "Working…");
+   const r = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" },
+-    body: JSON.stringify({ request: req, family: "counter" }) });
++    body: JSON.stringify(isPublicMock ? {demo_id: selectedDemoId} : {request: req, family: "counter"}) });
+   if (!r.ok) { setVerdict("fail", (await r.json()).detail || "error"); $("#run").disabled = false; return; }
+   state.job = (await r.json()).id;
+   poll();
+@@ -204,8 +215,8 @@ $("#probe").onclick = async () => {
+     if (r.detail) { out.textContent = r.detail; $("#probe").disabled = false; return; }
+     const rows = (r.probes || []).map((p) =>
+       `<tr><td>${esc(p.probe)}</td><td class="${p.contained ? "ok" : "esc"}">${p.contained ? "CONTAINED" : "ESCAPED"}</td><td>${esc(p.detail)}</td></tr>`).join("");
+-    const all = (r.probes || []).length === 9 && (r.probes || []).every((p) => p.contained);
+-    out.innerHTML = `<div class="verdict ${all ? "pass" : "fail"}">${all ? "9/9 local containment probes contained (not a formal security proof)" : "Containment probe failure/inconclusive"}</div>
++    const all = (r.probes || []).length === 10 && (r.probes || []).every((p) => p.contained);
++    out.innerHTML = `<div class="verdict ${all ? "pass" : "fail"}">${all ? "10/10 local containment probes contained (not a formal security proof)" : "Containment probe failure/inconclusive"}</div>
+       <table class="probes"><tr><th>Attack</th><th>Result</th><th>Detail</th></tr>${rows}</table>`;
+     showSandbox(r.containment || {});
+   } catch (e) { out.textContent = "probe failed: " + e; }
+diff --git a/deploy.sh b/deploy.sh
+index 10bc0c1..0475578 100755
+--- a/deploy.sh
++++ b/deploy.sh
+@@ -1,32 +1,37 @@
+ #!/usr/bin/env bash
+-# Private VM only, manual execution. Does not create/order cloud resources.
++# Manual deployment only: no paid cloud provisioning or Inference API calls.
+ set -euo pipefail
+ cd "$(dirname "$0")"
+-
++MODE="${1:-}"
++if [ "$#" -gt 1 ] || { [ -n "$MODE" ] && [ "$MODE" != "--public-mock" ]; }; then
++  echo 'Usage: ./deploy.sh [--public-mock]' >&2; exit 2
++fi
+ [ -f .env ] || { echo 'ERROR: create .env from .env.example first' >&2; exit 1; }
+ set -a
+ # shellcheck disable=SC1091
+ . ./.env
+ set +a
+-if [ "${APP_ENV:-}" != private ]; then
+-  echo 'ERROR: deploy.sh supports APP_ENV=private only; public rollout needs another review' >&2
+-  exit 1
+-fi
+-if [ "${PUBLIC_BIND_HOST:-127.0.0.1}" != 127.0.0.1 ]; then
+-  echo 'ERROR: deployment must bind loopback' >&2; exit 1
++if [ "$MODE" = "--public-mock" ]; then
++  [ "${APP_ENV:-}" = public_mock ] || { echo 'ERROR: --public-mock requires APP_ENV=public_mock' >&2; exit 1; }
++  [ "${PUBLIC_BIND_HOST:-}" = 0.0.0.0 ] || { echo 'ERROR: public mock requires PUBLIC_BIND_HOST=0.0.0.0' >&2; exit 1; }
++  [ "${PUBLIC_MOCK_ACK:-}" = 1 ] || { echo 'ERROR: public operator opt-in required' >&2; exit 1; }
++else
++  [ "${APP_ENV:-}" = private ] || { echo 'ERROR: default deploy requires APP_ENV=private' >&2; exit 1; }
++  [ "${PUBLIC_BIND_HOST:-127.0.0.1}" = 127.0.0.1 ] || { echo 'ERROR: private must bind loopback' >&2; exit 1; }
+ fi
+ : "${DOCKER_HOST_SOCKET:?Configure audited Docker socket path explicitly}"
+ [ -S "$DOCKER_HOST_SOCKET" ] || { echo 'ERROR: Docker socket unavailable' >&2; exit 1; }
+ if [ "${USE_LOCAL_SIM:-0}" = 1 ] || [ "${SKIP_MANIFEST:-0}" = 1 ]; then
+-  echo 'ERROR: unsafe downgrade flags are forbidden' >&2; exit 1
++  echo 'ERROR: unsafe downgrade flags forbidden' >&2; exit 1
+ fi
+-
+-# No hash regeneration here. Baseline changes require a separate reviewed commit.
++# Never write or regenerate the reviewed manifest during deploy.
+ python3 -m trusted.verify_manifest
+ python3 -c 'from app.config import validate_startup,require_localhost_binding; validate_startup(); require_localhost_binding()'
+-
+-echo 'Building local images and deploying to loopback only; check your VM usage and Vultr credit first.'
++if [ "$MODE" = "--public-mock" ]; then
++  echo 'Public MOCK ONLY: fixed demo IDs, no arbitrary RTL, no Vultr Inference; check VM/firewall and spending first.'
++else
++  echo 'Private VM only: SSH tunnel + Basic Auth; check VM credit and spending first.'
++fi
+ docker compose build sandbox backend
+ docker compose up -d backend
+-printf 'Private VM endpoint: http://127.0.0.1:%s/ (use SSH -L forwarding; HTTP Basic auth)\n' "${PUBLIC_PORT:-8000}"
+-printf 'No public URL / no live inference / no credit guarantee asserted by this script.\n'
++printf 'Endpoint: http://%s:%s/ (APP_ENV=%s)\n' "${PUBLIC_BIND_HOST:-127.0.0.1}" "${PUBLIC_PORT:-8000}" "$APP_ENV"
+diff --git a/docker-compose.yml b/docker-compose.yml
+index e379413..a257252 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -9,7 +9,7 @@ services:
+       INFERENCE_LEDGER_PATH: /state/quota.sqlite
+     # Private VM only: reach through SSH tunnel; never expose Docker control plane publicly.
+     ports:
+-      - "127.0.0.1:${PUBLIC_PORT:-8000}:8000"
++      - "${PUBLIC_BIND_HOST:-127.0.0.1}:${PUBLIC_PORT:-8000}:8000"
+     volumes:
+       # Explicitly selected rootless socket preferred; rootful daemon is a residual risk.
+       - "${DOCKER_HOST_SOCKET:?Set an explicit audited Docker socket path}:/var/run/docker.sock"
+diff --git a/reports/manifest.log b/reports/manifest.log
+new file mode 100644
+index 0000000..9218a6f
+--- /dev/null
++++ b/reports/manifest.log
+@@ -0,0 +1 @@
++MANIFEST_OK: counter4_sync_v1 26 assets
+diff --git a/reports/offline_unittest.log b/reports/offline_unittest.log
+new file mode 100644
+index 0000000..83fb97a
+--- /dev/null
++++ b/reports/offline_unittest.log
+@@ -0,0 +1,26 @@
++test_durable_inference_budget (test_security.ConfigBudgetTests.test_durable_inference_budget) ... ok
++test_mock_health_and_private_basic_auth (test_security.ConfigBudgetTests.test_mock_health_and_private_basic_auth) ... ok
++test_private_downgrades_fail_on_startup (test_security.ConfigBudgetTests.test_private_downgrades_fail_on_startup) ... ok
++test_private_mock_requires_password (test_security.ConfigBudgetTests.test_private_mock_requires_password) ... ok
++test_production_downgrades_fail_on_startup (test_security.ConfigBudgetTests.test_production_downgrades_fail_on_startup) ... ok
++test_backend_image_stages_every_pinned_file (test_security.PolicyTests.test_backend_image_stages_every_pinned_file) ... ok
++test_correct_ansi_interface (test_security.PolicyTests.test_correct_ansi_interface) ... ok
++test_forbidden_before_execution (test_security.PolicyTests.test_forbidden_before_execution) ... ok
++test_preflight_reject_never_calls_runner (test_security.PolicyTests.test_preflight_reject_never_calls_runner) ... ok
++test_pinned_images_and_container_label (test_security.PublicMockSecurityTests.test_pinned_images_and_container_label) ... ok
++test_public_concurrency_cap (test_security.PublicMockSecurityTests.test_public_concurrency_cap) ... ok
++test_public_http_only_fixed_demo_ids (test_security.PublicMockSecurityTests.test_public_http_only_fixed_demo_ids) ... ok
++test_public_rate_limit (test_security.PublicMockSecurityTests.test_public_rate_limit) ... ok
++test_public_startup_restrictions (test_security.PublicMockSecurityTests.test_public_startup_restrictions) ... ok
++test_bad_transport_frames (test_security.RunnerFrameTests.test_bad_transport_frames) ... ok
++test_edited_oracle_fails_integrity (test_security.VerdictTests.test_edited_oracle_fails_integrity) ... ok
++test_exit_and_timeout_never_pass (test_security.VerdictTests.test_exit_and_timeout_never_pass) ... ok
++test_manifest_bypass_forbidden_even_development (test_security.VerdictTests.test_manifest_bypass_forbidden_even_development) ... ok
++test_protocol_mutations_never_pass (test_security.VerdictTests.test_protocol_mutations_never_pass) ... ok
++test_stdout_pass_not_authoritative (test_security.VerdictTests.test_stdout_pass_not_authoritative) ... ok
++test_synthetic_protocol_fixture_only (test_security.VerdictTests.test_synthetic_protocol_fixture_only) ... ok
++
++----------------------------------------------------------------------
++Ran 21 tests in 0.204s
++
++OK
+diff --git a/sandbox/Dockerfile b/sandbox/Dockerfile
+index d462516..a6a3468 100644
+--- a/sandbox/Dockerfile
++++ b/sandbox/Dockerfile
+@@ -1,5 +1,5 @@
+ # Throwaway simulation sandbox: Icarus Verilog + Verilator (lint) + tiny runner. No secrets, no network at runtime.
+-FROM debian:bookworm-slim
++FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+ RUN apt-get update \
+  && apt-get install -y --no-install-recommends iverilog verilator python3 \
+  && rm -rf /var/lib/apt/lists/*
+diff --git a/sandbox/probe.py b/sandbox/probe.py
+index c75db37..73a9242 100644
+--- a/sandbox/probe.py
++++ b/sandbox/probe.py
+@@ -79,6 +79,20 @@ def fork_bomb():
+     return True, out.strip()[-160:]
+ 
+ 
++def host_sentinel():
++    # Host regression establishes this file EXISTS on the host at the same
++    # time. It must NOT be visible inside sandbox's separate /tmp tmpfs.
++    path = "/tmp/verilog-agent-host-sentinel/token"
++    try:
++        with open(path, "rb") as f:
++            f.read(1)
++        return False, "host sentinel readable inside sandbox (!)"
++    except FileNotFoundError:
++        return True, "host-only sentinel path absent in sandbox"
++    except OSError as exc:
++        return True, f"host sentinel not readable: {type(exc).__name__}"
++
++
+ def tmpfs_fill():
+     rc, out = _sub("f=open('/work/fill','wb')\ntry:\n for i in range(1024): f.write(b'0'*1024*1024)\n print('wrote 1GB')\n"
+                    "except OSError as e: print('stopped:', e.strerror)")
+@@ -101,6 +115,7 @@ PROBES = [
+     ("Memory bomb (4 GB)", memory_bomb),
+     ("Fork bomb (500 procs)", fork_bomb),
+     ("Fill scratch disk (1 GB)", tmpfs_fill),
++    ("Host-only sentinel isolation", host_sentinel),
+ ]
+ 
+ 
+diff --git a/scripts/public_mock_accept.py b/scripts/public_mock_accept.py
+new file mode 100644
+index 0000000..6ade64d
+--- /dev/null
++++ b/scripts/public_mock_accept.py
+@@ -0,0 +1,34 @@
++#!/usr/bin/env python3
++"""HTTP public MOCK smoke assertions; requires real running service/Docker."""
++import json
++import os
++from urllib.error import HTTPError
++from urllib.request import Request, urlopen
++
++BASE = os.environ.get('PUBLIC_MOCK_TEST_URL', 'http://127.0.0.1:8000')
++
++def request(path, payload=None):
++    b = None if payload is None else json.dumps(payload).encode()
++    try:
++        with urlopen(Request(BASE+path, data=b,
++                            headers={'Content-Type':'application/json'}), timeout=10) as r:
++            return r.status, json.loads(r.read(100_000))
++    except HTTPError as err:
++        return err.code, {}
++
++
++def main():
++    code, health = request('/api/health')
++    assert code == 200 and health['app_env'] == 'public_mock' and health['inference_mode'] == 'MOCK'
++    for p in ('/docs', '/openapi.json', '/redoc'):
++        assert request(p)[0] == 404
++    for bad in ({'request':'arbitrary code'}, {'demo_id':'counter','request':'inject'},
++                {'demo_id':'unknown'}):
++        assert request('/api/jobs', bad)[0] in (400, 422)
++    assert request('/api/probe', {})[0] == 404
++    code, job = request('/api/jobs', {'demo_id':'counter'})
++    assert code == 200 and 'id' in job
++    print('PUBLIC_MOCK_HTTP_RESTRICTIONS_CHECKED; job started; verdict remains host-only:', job['id'])
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/real_sandbox_regression.py b/scripts/real_sandbox_regression.py
+index 8c3e9ce..644b9ca 100644
+--- a/scripts/real_sandbox_regression.py
++++ b/scripts/real_sandbox_regression.py
+@@ -1,11 +1,47 @@
+ #!/usr/bin/env python3
+-"""Docker/Icarus-only independent host verdict regression (requires Docker on VM)."""
++"""Private VM ONLY: real Docker, host oracle, host-only sentinel and chaos TB.
++
++Do not treat this as self-issued certification; save console logs for independent review.
++Run when no other verilog-agent sandbox jobs are active.
++"""
+ from __future__ import annotations
++import json
++import os
+ import secrets
++import subprocess
+ import sys
+-from app import mock as canned, sandbox
++from contextlib import contextmanager
++from pathlib import Path
++from app import mock as canned, sandbox, docker_wrapper as dw
+ from trusted import preflight, verdict
+ 
++ROOT = Path(__file__).resolve().parent.parent
++SENTINEL_DIR = Path('/tmp/verilog-agent-host-sentinel')
++SENTINEL = SENTINEL_DIR / 'token'
++
++
++@contextmanager
++def host_only_sentinel():
++    # Never overwrite an existing user's sentinel.
++    SENTINEL_DIR.mkdir(mode=0o700, exist_ok=False)
++    token = secrets.token_hex(32)
++    try:
++        SENTINEL.write_text(token, encoding='ascii')
++        os.chmod(SENTINEL, 0o600)
++        yield token
++        assert SENTINEL.read_text() == token, 'host sentinel modified!'
++    finally:
++        SENTINEL.unlink(missing_ok=True)
++        SENTINEL_DIR.rmdir()
++
++
++def assert_no_labeled_containers():
++    p = subprocess.run([dw.DOCKER, 'ps', '-aq', '--filter', 'label=verilog-agent=1'],
++                       capture_output=True, text=True, timeout=10, check=True)
++    if p.stdout.strip():
++        raise RuntimeError('unremoved labeled sandbox containers: ' + p.stdout.strip())
++    print('SANDBOX_LABEL_CLEANUP: no label=verilog-agent=1 containers remain')
++
+ 
+ def run_one(label: str, rtl: str, expect: str):
+     gate = preflight.validate(rtl, 'counter')
+@@ -19,6 +55,43 @@ def run_one(label: str, rtl: str, expect: str):
+           f'cleanup={raw.get("containment", {}).get("destroyed")}')
+     if out['reason'] != expect or not raw.get('containment', {}).get('destroyed'):
+         raise RuntimeError(f'{label} unexpected host result/cleanup')
++    assert_no_labeled_containers()
++
++
++def probe_and_chaos(token: str):
++    # Probe runs in the same isolated image/flags; no socket, host token or mounts.
++    result = sandbox.run_probe()
++    checks = {x['probe']: x for x in result.get('probes', [])}
++    sentinel_name = 'Host-only sentinel isolation'
++    if (result.get('stage') != 'probe' or not result.get('ok') or
++            sentinel_name not in checks or not checks[sentinel_name]['contained'] or
++            len(checks) != 10 or not result.get('containment', {}).get('destroyed')):
++        raise RuntimeError('containment/sentinel probes failed: ' + str(result)[:2000])
++    assert SENTINEL.read_text() == token
++    assert_no_labeled_containers()
++    print('SENTINEL_PROBE: host token present, sandbox cannot read; 10/10 probes reported contained')
++
++    # Deliberately evil *trusted regression TB* runs only via operator script.
++    # This must never be accepted as a real counter TB / host PASS.
++    nonce = secrets.token_hex(16)
++    payload = {'mode': 'sim', 'top': 'tb_top', 'nonce': nonce, 'sim_timeout': 5,
++               'lint': False,
++               'files': {'dut.v': canned.COUNTER_OK,
++                         'tb_counter.sv': (ROOT/'trusted/chaos_tb.sv').read_text()}}
++    raw = dw.run_sandbox(json.dumps(payload), wall_seconds=30)
++    if raw.returncode != 0 or not raw.cleanup_verified:
++        raise RuntimeError('chaos runner/cleanup did not complete')
++    if 'SENTINEL_VISIBLE=0' not in raw.stdout or 'SENTINEL_VISIBLE=1' in raw.stdout:
++        raise RuntimeError('host sentinel visibility isolation not demonstrated')
++    if token in raw.stdout or token in raw.stderr:
++        raise RuntimeError('host sentinel value leaked into container output')
++    parsed = sandbox._parse_result(raw.stdout, raw.stderr, raw.returncode, raw.killed_by_wall)
++    assert parsed.get('stage') == 'sandbox', 'nested @@RESULT@@ must invalidate runner frame'
++    art = verdict.judge(canned.COUNTER_OK, 'counter', nonce, parsed)
++    assert art['verdict'] == 'FAIL', 'chaos TB forgery must never gain a host PASS'
++    assert SENTINEL.read_text() == token
++    assert_no_labeled_containers()
++    print('CHAOS_TB: forged PASS/VLTB1/runner marker rejected; sentinel inaccessible; cleanup verified')
+ 
+ 
+ def main():
+@@ -27,20 +100,23 @@ def main():
+     ready, detail = sandbox.docker_available()
+     if not ready:
+         raise RuntimeError('Docker sandbox image missing: ' + detail)
+-    run_one('counter good', canned.COUNTER_OK, 'ORACLE_AGREEMENT')
+-    run_one('counter bad enable', canned.COUNTER_BAD_EN, 'ORACLE_MISMATCH')
+-    async_reset = canned.COUNTER_OK.replace('always @(posedge clk)',
+-                                            'always @(posedge clk or posedge rst)')
+-    run_one('counter async reset', async_reset, 'ORACLE_MISMATCH')
+-    bad_wrap = canned.COUNTER_OK.replace("count <= count + 4'd1;",
+-                                         'count <= (count == 15) ? 15 : count + 1;')
+-    run_one('counter bad wrap', bad_wrap, 'ORACLE_MISMATCH')
+-    bad_x = canned.COUNTER_OK.replace("count <= 4'd0;", "count <= 4'bxxxx;")
+-    run_one('counter X output', bad_x, 'ORACLE_MISMATCH')
+-    # The correct verifier does not call Docker for malicious RTL.
+-    malicious = canned.COUNTER_OK.replace('endmodule', '$display("PASS"); endmodule')
+-    assert not preflight.validate(malicious, 'counter')['ok']
+-    print('malicious candidate: rejected pre-execution')
++    assert_no_labeled_containers()
++    with host_only_sentinel() as token:
++        run_one('counter good', canned.COUNTER_OK, 'ORACLE_AGREEMENT')
++        run_one('counter bad enable', canned.COUNTER_BAD_EN, 'ORACLE_MISMATCH')
++        async_reset = canned.COUNTER_OK.replace('always @(posedge clk)',
++                                                'always @(posedge clk or posedge rst)')
++        run_one('counter async reset', async_reset, 'ORACLE_MISMATCH')
++        bad_wrap = canned.COUNTER_OK.replace("count <= count + 4'd1;",
++                                             'count <= (count == 15) ? 15 : count + 1;')
++        run_one('counter bad wrap', bad_wrap, 'ORACLE_MISMATCH')
++        bad_x = canned.COUNTER_OK.replace("count <= 4'd0;", "count <= 4'bxxxx;")
++        run_one('counter X output', bad_x, 'ORACLE_MISMATCH')
++        malicious = canned.COUNTER_OK.replace('endmodule', '$display("PASS"); endmodule')
++        assert not preflight.validate(malicious, 'counter')['ok']
++        print('MALICIOUS_RTL: rejected by preflight before run_sim')
++        probe_and_chaos(token)
++    print('REGRESSION_FINISHED: review real VM evidence independently; no self-issued PASS')
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/tests/test_security.py b/tests/test_security.py
+index 10d21e4..658aad9 100644
+--- a/tests/test_security.py
++++ b/tests/test_security.py
+@@ -222,3 +222,88 @@ class ConfigBudgetTests(unittest.TestCase):
+ 
+ if __name__ == '__main__':
+     unittest.main()
++
++
++class PublicMockSecurityTests(unittest.TestCase):
++    def test_public_startup_restrictions(self):
++        env = {'APP_ENV':'public_mock', 'PUBLIC_BIND_HOST':'0.0.0.0',
++               'PUBLIC_MOCK_ACK':'1', 'MOCK_LLM':'1'}
++        with mock.patch.dict(os.environ, env, clear=True), \
++             mock.patch.object(config, 'require_rootless') as rootless:
++            config.validate_startup()
++            rootless.assert_called_once()
++            for flag in ('USE_LOCAL_SIM', 'SKIP_MANIFEST'):
++                with self.subTest(flag=flag), mock.patch.dict(os.environ, {flag:'1'}):
++                    with self.assertRaises(RuntimeError): config.validate_startup()
++            for bad in ({'MOCK_LLM':'0'}, {'VULTR_INFERENCE_API_KEY':'secret'},
++                        {'PUBLIC_BIND_HOST':'127.0.0.1'}, {'PUBLIC_MOCK_ACK':'0'},
++                        {'PUBLIC_MAX_ACTIVE_JOBS':'30'}):
++                with self.subTest(bad=bad), mock.patch.dict(os.environ, bad):
++                    with self.assertRaises(RuntimeError): config.validate_startup()
++
++    def test_public_http_only_fixed_demo_ids(self):
++        from fastapi.testclient import TestClient
++        from app.main import app, _hits, _global_hits, _global_reads
++        env = {'APP_ENV':'public_mock', 'PUBLIC_BIND_HOST':'0.0.0.0',
++               'PUBLIC_MOCK_ACK':'1', 'MOCK_LLM':'1', 'PUBLIC_RATE_LIMIT_PER_MIN':'12'}
++        with mock.patch.dict(os.environ, env, clear=True), \
++             mock.patch('app.main.agent.start', return_value={'id':'x','family':'counter'}) as start, \
++             mock.patch('app.main.sandbox.docker_available', return_value=(False,'no Docker')):
++            _hits.clear(); _global_hits.clear(); _global_reads.clear()
++            with TestClient(app) as c:
++                for path in ('/docs','/openapi.json','/redoc'):
++                    self.assertEqual(c.get(path).status_code, 404)
++                self.assertEqual(c.post('/api/probe').status_code,404)
++                for payload in ({'request':'arbitrary RTL'},
++                                {'demo_id':'counter','request':'malicious'},
++                                {'demo_id':'unknown'},
++                                {'demo_id':'counter','family':'counter'},
++                                {'demo_id':'counter','request':''}):
++                    with self.subTest(payload=payload):
++                        self.assertIn(c.post('/api/jobs',json=payload).status_code,(400,422))
++                self.assertEqual(c.post('/api/jobs',json={'demo_id':'counter'}).status_code,200)
++                start.assert_called_once_with(canned.DEMOS[0]['prompt'],public_demo_id='counter')
++                self.assertEqual(c.post('/api/jobs', content=b'x' * 2000,
++                                        headers={'Content-Type': 'application/json'}).status_code, 413)
++                self.assertEqual(c.get('/api/health').json()['inference_mode'],'MOCK')
++
++    def test_public_concurrency_cap(self):
++        from app import agent
++        env = {'APP_ENV':'public_mock','MOCK_LLM':'1'}
++        with mock.patch.dict(os.environ, env, clear=True):
++            # Use a separate exhausted semaphore so no worker is launched.
++            import threading
++            sem = threading.BoundedSemaphore(1)
++            sem.acquire()
++            with mock.patch.object(agent, '_public_slots', sem):
++                with self.assertRaises(agent.JobCapacityError):
++                    agent.start(canned.DEMOS[0]['prompt'], public_demo_id='counter')
++            with self.assertRaises(ValueError):
++                agent.start('arbitrary RTL', public_demo_id='counter')
++
++    def test_public_rate_limit(self):
++        from fastapi.testclient import TestClient
++        from app.main import app, _hits, _global_hits, _global_reads
++        env = {'APP_ENV':'public_mock', 'MOCK_LLM':'1',
++               'PUBLIC_RATE_LIMIT_PER_MIN':'2', 'PUBLIC_GLOBAL_LIMIT_PER_MIN':'3'}
++        with mock.patch.dict(os.environ, env, clear=True), \
++             mock.patch('app.main.agent.start', return_value={'id':'x','family':'counter'}) as start:
++            _hits.clear(); _global_hits.clear(); _global_reads.clear()
++            with TestClient(app) as c:
++                self.assertEqual(c.post('/api/jobs',json={'demo_id':'counter'}).status_code,200)
++                self.assertEqual(c.post('/api/jobs',json={'demo_id':'counter'}).status_code,200)
++                self.assertEqual(c.post('/api/jobs',json={'demo_id':'counter'}).status_code,429)
++                self.assertEqual(c.get('/api/demos').status_code,200)  # GET quota separate
++            self.assertEqual(start.call_count,2)
++
++    def test_pinned_images_and_container_label(self):
++        from app import docker_wrapper
++        root = Path(__file__).resolve().parent.parent
++        self.assertIn('FROM debian:bookworm-slim@sha256:99c0', (root/'sandbox/Dockerfile').read_text())
++        self.assertIn('FROM python:3.12-slim-bookworm@sha256:e697', (root/'Dockerfile').read_text())
++        self.assertIn('11.0-1.1', (root/'VERSIONS').read_text())
++        flags = docker_wrapper._flags('vsbx-0123456789ab')
++        self.assertIn('verilog-agent=1', flags)
++        self.assertNotIn('-v', flags)
++        self.assertIn('SENTINEL_VISIBLE=0', (root/'scripts/real_sandbox_regression.py').read_text())
++        self.assertIn('verilog-agent-host-sentinel/token', (root/'trusted/chaos_tb.sv').read_text())
+diff --git a/trusted/chaos_tb.sv b/trusted/chaos_tb.sv
+new file mode 100644
+index 0000000..ac3086a
+--- /dev/null
++++ b/trusted/chaos_tb.sv
+@@ -0,0 +1,20 @@
++// TRUSTED security regression ONLY. Never used to decide a candidate's PASS.
++// Deliberately prints forged assertions and probes the host-only sentinel path.
++`timescale 1ns/1ps
++module tb_top;
++  reg clk=0, rst=1, en=0;
++  wire [3:0] count;
++  dut test_dut(.clk(clk), .rst(rst), .en(en), .count(count));
++  integer f;
++  initial begin
++    $display("PASS");
++    $display("VLTB1|0123456789abcdef0123456789abcdef|BEGIN|counter|counter4_sync_v1");
++    $display("@@RESULT@@{}");
++    f = $fopen("/tmp/verilog-agent-host-sentinel/token", "r");
++    if (f != 0) begin
++      $display("SENTINEL_VISIBLE=1");
++      $fclose(f);
++    end else $display("SENTINEL_VISIBLE=0");
++    #1 $finish;
++  end
++endmodule
+diff --git a/trusted/manifest.json b/trusted/manifest.json
+index ccfc076..d984f5e 100644
+--- a/trusted/manifest.json
++++ b/trusted/manifest.json
+@@ -3,24 +3,31 @@
+   "family": "counter",
+   "expected_records": 87,
+   "files": {
+-    "../Dockerfile": "a2c96827100f9970abf65b32dc32df0bb140d0e71218a718d56dea28c4fa3d83",
+-    "../app/agent.py": "10f87e24210510609b0088af1db236d3fec5863d79f4ba038a9be05dce627cac",
++    "../.dockerignore": "516250555db48c7a74d2b2cb9ff69691e416b15030a906df2fe60cc349ad57e9",
++    "../Dockerfile": "9bfcd5f3893f7ea17f2c6fa8347a5c164e4b5465bbb7bd1957c43eee332e40fa",
++    "../VERSIONS": "5c2328bdc51ccea4bf675bb499fbbd68fa341e774e00de61ddcff1a51438c925",
++    "../app/agent.py": "60919450cc170db8266da50ffb35bae2bf029d8819054977b005bc2e2ecc4ea5",
+     "../app/budget.py": "f37b072ad3ad75193e9695d5d8eabbecb0aad29066f824f84bc7150737c9e847",
+-    "../app/config.py": "1f64f882fd820292838333804f26a3ffe6ef21916839172aaac5f49e10f992db",
+-    "../app/docker_wrapper.py": "409697f9fc2c20d66034624b492537e68dc59bb3e9e07dde0e91267a98193e61",
++    "../app/config.py": "75bc1bcfbb8fe840c38c7c3a08caa305da45969beef2b6ae8669463d7806e8f4",
++    "../app/docker_wrapper.py": "f51eebd550d945d72c0f5c6891bc901859332b16d402ac032cec9f6604a2d348",
+     "../app/llm.py": "149d912e5e08bd026e37dd42e0cb94ebcc00dd4279ee838cf7272a2e070972b4",
+-    "../app/main.py": "b02bbd23f0ba112360543528d29d4e0b10d6fad5c5d20e5c268a0287896c10fd",
++    "../app/main.py": "9b46ef5a5985077682247e55d8f4ff8cb3c7be64efb90361bb2260d1106fe18f",
+     "../app/sandbox.py": "713330af1c227c95981ffb8bf07a02a9ea0cf46278bd3fda8c3499b324a34ac3",
+-    "../deploy.sh": "29f2b1d313d4c754bb67dfe5f635017b3c77d101c5805ac5116ad54b9075243c",
+-    "../docker-compose.yml": "0e6469798e18a2f88948379e67e3440cbc772d523a863351fb0ea8e1474cfe50",
+-    "../sandbox/Dockerfile": "e12367e57db094234f52a2e5732a747b3b352aa9f1ce076ce0fe0dc52f1f3ffc",
++    "../app/static/app.js": "832f67db509a14ea3a6e69831820c0985f77176967b71e550e4e70c0a3d7c045",
++    "../deploy.sh": "ae6635d2578c64ae8fe950ae98349f4e87acfe54e9abed6d6c03503c049813d8",
++    "../docker-compose.yml": "9471f27872cf76b2413339bdf17ddb9b20da20a503d21dbc84a50b0cad3a61ef",
++    "../sandbox/Dockerfile": "f313161053a13dcd392e78e6bff11e2af0fb205aad36569ff078c77a94a6cc18",
++    "../sandbox/probe.py": "920da2541a55eb53d784ecde84ae3009349703a015fab157042060385d9a235b",
+     "../sandbox/runner.py": "b1514fcd6dca67761f364499a2f860aa5cc00c0cb718b9649c8932a58224a81c",
++    "../scripts/public_mock_accept.py": "6816896378df587afc5c9edb5da141f82dbf7caa6c8830e5326a796c936d3010",
++    "../scripts/real_sandbox_regression.py": "fbb09f73e8ced5846d4a593cdbb228ed880dda79832c4facd5a4574e67802235",
++    "chaos_tb.sv": "8cbb4566693f9d05839150ea3935f93ac2a4990d42b787a4456a210debb05dbe",
+     "lint_rtl.py": "aaf23f7f63d16b687da3777eb29e48845c1ef18d4cdc0da2180dfe302c3958b4",
+     "oracle.py": "e8338096b9c66c0d654d513ac8243dfc9f95fe6c7a14923f1bb2cf6276407a51",
+     "preflight.py": "700ad0cc0a99c8ac166a935c6da029f91d0b7e79adaf861d7837dcd15f7a4295",
+     "tb_counter.sv": "2fe9e78fe614b89af9aba927a8129c9ba4c6ee20a19378610dadf99d13069431",
+     "vectors/counter.json": "31512181346f5874a729c14c08e965d5630a00d53f2e2318fc4d457cef4b91b3",
+-    "verdict.py": "b4d896e2e573439a67e5337edf327381c4d181dc51de41c86ec1b0fe1208a8f7",
++    "verdict.py": "abf0da23b99809219151b4bf01cd62e39b89e1b5dd817c48aefe764ef5121979",
+     "verify_manifest.py": "3355963f201571ec6e31871190212e3c36bc9356d956cbf6c0b9d25f44a865bb"
+   }
+ }
+diff --git a/trusted/verdict.py b/trusted/verdict.py
+index fc78bf8..62fd9ab 100644
+--- a/trusted/verdict.py
++++ b/trusted/verdict.py
+@@ -32,6 +32,9 @@ PINNED_FILES = frozenset({
+     '../app/config.py', '../app/llm.py', '../app/budget.py', '../app/main.py',
+     '../sandbox/runner.py', '../sandbox/Dockerfile', '../Dockerfile',
+     '../docker-compose.yml', '../deploy.sh',
++    'chaos_tb.sv', '../sandbox/probe.py', '../VERSIONS',
++    '../app/static/app.js', '../scripts/real_sandbox_regression.py',
++    '../scripts/public_mock_accept.py', '../.dockerignore',
+ })
+ MAX_PROTOCOL_BYTES = 16_384
+ MAX_PROTOCOL_LINES = 100

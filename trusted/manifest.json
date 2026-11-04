@@ -1,0 +1,33 @@
+{
+  "version": "counter4_sync_v1",
+  "family": "counter",
+  "expected_records": 87,
+  "files": {
+    "../.dockerignore": "516250555db48c7a74d2b2cb9ff69691e416b15030a906df2fe60cc349ad57e9",
+    "../Dockerfile": "9bfcd5f3893f7ea17f2c6fa8347a5c164e4b5465bbb7bd1957c43eee332e40fa",
+    "../VERSIONS": "5c2328bdc51ccea4bf675bb499fbbd68fa341e774e00de61ddcff1a51438c925",
+    "../app/agent.py": "60919450cc170db8266da50ffb35bae2bf029d8819054977b005bc2e2ecc4ea5",
+    "../app/budget.py": "f37b072ad3ad75193e9695d5d8eabbecb0aad29066f824f84bc7150737c9e847",
+    "../app/config.py": "75bc1bcfbb8fe840c38c7c3a08caa305da45969beef2b6ae8669463d7806e8f4",
+    "../app/docker_wrapper.py": "f51eebd550d945d72c0f5c6891bc901859332b16d402ac032cec9f6604a2d348",
+    "../app/llm.py": "149d912e5e08bd026e37dd42e0cb94ebcc00dd4279ee838cf7272a2e070972b4",
+    "../app/main.py": "9b46ef5a5985077682247e55d8f4ff8cb3c7be64efb90361bb2260d1106fe18f",
+    "../app/sandbox.py": "713330af1c227c95981ffb8bf07a02a9ea0cf46278bd3fda8c3499b324a34ac3",
+    "../app/static/app.js": "832f67db509a14ea3a6e69831820c0985f77176967b71e550e4e70c0a3d7c045",
+    "../deploy.sh": "ae6635d2578c64ae8fe950ae98349f4e87acfe54e9abed6d6c03503c049813d8",
+    "../docker-compose.yml": "9471f27872cf76b2413339bdf17ddb9b20da20a503d21dbc84a50b0cad3a61ef",
+    "../sandbox/Dockerfile": "f313161053a13dcd392e78e6bff11e2af0fb205aad36569ff078c77a94a6cc18",
+    "../sandbox/probe.py": "920da2541a55eb53d784ecde84ae3009349703a015fab157042060385d9a235b",
+    "../sandbox/runner.py": "b1514fcd6dca67761f364499a2f860aa5cc00c0cb718b9649c8932a58224a81c",
+    "../scripts/public_mock_accept.py": "6816896378df587afc5c9edb5da141f82dbf7caa6c8830e5326a796c936d3010",
+    "../scripts/real_sandbox_regression.py": "fbb09f73e8ced5846d4a593cdbb228ed880dda79832c4facd5a4574e67802235",
+    "chaos_tb.sv": "8cbb4566693f9d05839150ea3935f93ac2a4990d42b787a4456a210debb05dbe",
+    "lint_rtl.py": "aaf23f7f63d16b687da3777eb29e48845c1ef18d4cdc0da2180dfe302c3958b4",
+    "oracle.py": "e8338096b9c66c0d654d513ac8243dfc9f95fe6c7a14923f1bb2cf6276407a51",
+    "preflight.py": "700ad0cc0a99c8ac166a935c6da029f91d0b7e79adaf861d7837dcd15f7a4295",
+    "tb_counter.sv": "2fe9e78fe614b89af9aba927a8129c9ba4c6ee20a19378610dadf99d13069431",
+    "vectors/counter.json": "31512181346f5874a729c14c08e965d5630a00d53f2e2318fc4d457cef4b91b3",
+    "verdict.py": "abf0da23b99809219151b4bf01cd62e39b89e1b5dd817c48aefe764ef5121979",
+    "verify_manifest.py": "3355963f201571ec6e31871190212e3c36bc9356d956cbf6c0b9d25f44a865bb"
+  }
+}

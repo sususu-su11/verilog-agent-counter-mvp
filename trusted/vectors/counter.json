@@ -1,0 +1,30 @@
+{
+  "suite_id": "counter4_sync_v1",
+  "family": "counter",
+  "case": "main",
+  "description": "4-bit sync up-counter: reset, hold, reset-priority, wrap",
+  "steps": [
+    {"step": 0, "rst": 1, "en": 0},
+    {"step": 1, "rst": 0, "en": 1},
+    {"step": 2, "rst": 0, "en": 1},
+    {"step": 3, "rst": 0, "en": 0},
+    {"step": 4, "rst": 1, "en": 1},
+    {"step": 5, "rst": 0, "en": 1},
+    {"step": 6, "rst": 0, "en": 1},
+    {"step": 7, "rst": 0, "en": 1},
+    {"step": 8, "rst": 0, "en": 1},
+    {"step": 9, "rst": 0, "en": 1},
+    {"step": 10, "rst": 0, "en": 1},
+    {"step": 11, "rst": 0, "en": 1},
+    {"step": 12, "rst": 0, "en": 1},
+    {"step": 13, "rst": 0, "en": 1},
+    {"step": 14, "rst": 0, "en": 1},
+    {"step": 15, "rst": 0, "en": 1},
+    {"step": 16, "rst": 0, "en": 1},
+    {"step": 17, "rst": 0, "en": 1},
+    {"step": 18, "rst": 0, "en": 1},
+    {"step": 19, "rst": 0, "en": 1},
+    {"step": 20, "rst": 0, "en": 1},
+    {"step": 21, "rst": 0, "en": 0}
+  ]
+}

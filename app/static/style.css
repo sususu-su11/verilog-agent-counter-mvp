@@ -1,0 +1,42 @@
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1420;color:#dfe6f3}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-bottom:1px solid #263047;background:#121a2b}
+.brand{font-size:18px;font-weight:600}.brand small{font-weight:400;color:#8b98b3;margin-left:8px;font-size:13px}
+.logo{color:#4fd1c5}
+.badge{padding:4px 10px;border-radius:12px;background:#263047;font-size:12px}
+.badge.mock{background:#5a4a12;color:#ffe08a}.badge.live{background:#11493f;color:#7ff0d7}
+main{display:grid;grid-template-columns:380px 1fr;gap:16px;padding:16px 20px}
+label{display:block;margin-bottom:6px;color:#a9b6cf}
+textarea{width:100%;background:#0b101a;color:#e6edf7;border:1px solid #2c3852;border-radius:8px;padding:10px;font:inherit;resize:vertical}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chips button{font-size:12px;padding:4px 9px;border-radius:14px}
+button{background:#1d2840;color:#dfe6f3;border:1px solid #33415f;border-radius:8px;padding:8px 12px;cursor:pointer;font:inherit}
+button:hover{border-color:#4fd1c5}button:disabled{opacity:.5;cursor:wait}
+button.primary{background:#0f766e;border-color:#14b8a6;font-weight:600}
+.row{display:flex;gap:8px;margin:8px 0}
+h3{margin:18px 0 6px;font-size:14px;color:#a9b6cf}
+#timeline{list-style:none;padding:0;margin:0;font-size:13px}
+#timeline li{padding:6px 8px;border-left:3px solid #33415f;margin-bottom:4px;background:#121a2b;border-radius:0 6px 6px 0}
+#timeline li.ok{border-color:#22c55e}#timeline li.bad{border-color:#ef4444}#timeline li.heal{border-color:#f59e0b}
+#timeline li .t{color:#6b7896;font-size:11px;margin-right:6px}
+#timeline details pre{max-height:160px;overflow:auto;font-size:11px;background:#0b101a;padding:6px}
+.sandboxinfo{margin-top:12px;font-size:12px;color:#8b98b3}
+.sandboxinfo code{color:#7ff0d7}
+.verdict{font-size:20px;font-weight:700;padding:10px 14px;border-radius:8px;margin-bottom:10px}
+.verdict.pass{background:#0f3d2a;color:#5ef2a0}.verdict.fail{background:#4a1515;color:#ff9a9a}.verdict.run{background:#263047}
+.attemptTabs{display:flex;gap:6px;margin-bottom:8px}
+.attemptTabs button.sel{border-color:#4fd1c5;background:#16334a}
+.attemptTabs .p{color:#5ef2a0}.attemptTabs .f{color:#ff9a9a}
+.tabs{display:flex;gap:4px;border-bottom:1px solid #263047}
+.tabs button{border-radius:8px 8px 0 0;border-bottom:none}.tabs button.active{background:#263047;border-color:#4fd1c5}
+.panel{background:#0b101a;border:1px solid #263047;border-top:none;padding:12px;min-height:420px;max-height:70vh;overflow:auto;margin:0;font:12.5px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre}
+.hidden{display:none!important}
+.wave{overflow-x:auto}.wave svg text{font:11px ui-monospace,monospace;fill:#cbd5e1}
+.wavetools{font-family:system-ui;font-size:12px;color:#8b98b3;margin-bottom:6px}
+.wavetools a{color:#4fd1c5;margin-left:12px}
+.muted{color:#6b7896}
+table.probes{border-collapse:collapse;width:100%;margin-top:10px;font-size:13px}
+table.probes td,table.probes th{border-bottom:1px solid #263047;padding:6px;text-align:left;vertical-align:top}
+.ok{color:#5ef2a0}.esc{color:#ff7a7a;font-weight:700}
+footer{color:#6b7896;font-size:12px;padding:10px 20px;border-top:1px solid #263047}
+@media(max-width:900px){main{grid-template-columns:1fr}}

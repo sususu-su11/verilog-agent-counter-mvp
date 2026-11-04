@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: .
+    image: verilog-agent-backend:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PYTHONPATH: /srv
+      INFERENCE_LEDGER_PATH: /state/quota.sqlite
+    # Private VM only: reach through SSH tunnel; never expose Docker control plane publicly.
+    ports:
+      - "${PUBLIC_BIND_HOST:-127.0.0.1}:${PUBLIC_PORT:-8000}:8000"
+    volumes:
+      # Explicitly selected rootless socket preferred; rootful daemon is a residual risk.
+      - "${DOCKER_HOST_SOCKET:?Set an explicit audited Docker socket path}:/var/run/docker.sock"
+      - ./state:/state
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    mem_limit: 1g
+    pids_limit: 128
+
+  sandbox:
+    profiles: ["build"]
+    build: ./sandbox
+    image: verilog-sandbox:local
