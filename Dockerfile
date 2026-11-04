@@ -19,4 +19,4 @@ COPY scripts ./scripts
 COPY VERSIONS ./VERSIONS
 ENV PYTHONUNBUFFERED=1 MPLCONFIGDIR=/tmp/mpl PYTHONPATH=/srv
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", ""]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
